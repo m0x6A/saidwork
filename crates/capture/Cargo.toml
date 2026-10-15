@@ -1,0 +1,26 @@
+[package]
+name = "saidwork-capture"
+description = "Audio capture port, mixing and WAV encoding"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+saidwork-kernel.workspace = true
+thiserror.workspace = true
+hound.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding.workspace = true
+libpulse-simple-binding.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

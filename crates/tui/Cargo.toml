@@ -1,0 +1,25 @@
+[package]
+name = "saidwork-tui"
+description = "Terminal user interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+saidwork-kernel.workspace = true
+saidwork-app.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+futures.workspace = true
+saidwork-capture.workspace = true
+saidwork-formats.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+insta.workspace = true

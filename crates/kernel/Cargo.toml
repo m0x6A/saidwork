@@ -1,0 +1,22 @@
+[package]
+name = "saidwork-kernel"
+description = "Shared kernel: clock, paths and secret types used by every slice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+directories.workspace = true
+secrecy.workspace = true
+thiserror.workspace = true
+url.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -1,0 +1,84 @@
+# saidwork configuration. Copy to ~/.config/saidwork/saidwork.toml (or run `saidwork config init`).
+
+[capture]
+# "default", "none", or a device id as printed by `saidwork devices`.
+microphone = "default"
+system_audio = "default"
+
+[pipeline]
+# Names of the providers below.
+transcriber = "pianissimo"
+rewriter = "gemma-local"
+# Format pre-selected in the UI and used by `saidwork record` when --format is not given.
+default_format = "meeting-notes"
+# Optional ISO-639-1 language hint for the transcriber ("en", "sv", ...). Pianissimo is Swedish-only.
+language = "sv"
+
+[notes]
+# Where finished notes are written. Defaults to ~/Documents/saidwork.
+# directory = "~/Documents/saidwork"
+
+[formats]
+# Where format templates (*.md) live. Defaults to ~/.config/saidwork/formats.
+# directory = "~/.config/saidwork/formats"
+
+# ---------------------------------------------------------------------------
+# Providers. `base_url` is the server root; the API paths (/v1/..., /api/...)
+# are appended by saidwork. API keys come from the environment via `api_key_env`.
+# A `launch` block makes saidwork start the server when it is not answering.
+# ---------------------------------------------------------------------------
+
+# Klang Pianissimo (Swedish speech-to-text, KlangAI/pianissimo-sv-onnx) served by
+# tools/pianissimo-server/server.py through onnx-asr on the CPU. First start downloads
+# the model (~660 MB); `uv` creates the Python environment on demand.
+[providers.pianissimo]
+kind = "openai-compatible"
+base_url = "http://127.0.0.1:8178"
+model = "pianissimo-sv"          # informational; the server has one model
+[providers.pianissimo.launch]
+command = "uv"
+args = ["run", "~/develop/saidwork/tools/pianissimo-server/server.py", "--port", "8178"]
+health_path = "/health"
+startup_timeout_secs = 600       # generous for the first-run download
+stop_on_exit = true
+
+# Gemma 4 12B on llama.cpp (ROCm/HIP build), started through the ada project's wrapper.
+# `--reasoning-budget 0` turns thinking off so the reply is the finished note.
+[providers.gemma-local]
+kind = "openai-compatible"
+base_url = "http://127.0.0.1:8080"
+model = "gemma-4-12B-it"         # llama-server ignores the name; required by the API
+[providers.gemma-local.launch]
+command = "~/develop/Projects/ada/scripts/llama-server.sh"
+args = ["--reasoning-budget", "0"]
+health_path = "/health"
+startup_timeout_secs = 120
+stop_on_exit = true
+
+# Alternatives --------------------------------------------------------------
+
+# whisper.cpp's server, if you build it (also speaks the OpenAI transcription API).
+# [providers.whisper-local]
+# kind = "openai-compatible"
+# base_url = "http://127.0.0.1:8179"
+# model = "whisper-1"
+# [providers.whisper-local.launch]
+# command = "whisper-server"
+# args = ["--host", "127.0.0.1", "--port", "8179", "-m", "~/.local/share/whisper/ggml-large-v3-turbo.bin"]
+
+# Ollama (native API), e.g. `sudo dnf install ollama` on Fedora.
+# [providers.ollama]
+# kind = "ollama"
+# base_url = "http://127.0.0.1:11434"
+# model = "qwen3:8b"
+# [providers.ollama.launch]
+# command = "ollama"
+# args = ["serve"]
+# stop_on_exit = false
+
+# Hosted providers (keys from the environment).
+# [providers.openai]
+# kind = "openai-compatible"
+# base_url = "https://api.openai.com"
+# model = "gpt-4o-mini"
+# api_key_env = "OPENAI_API_KEY"

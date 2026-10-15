@@ -1,0 +1,23 @@
+[package]
+name = "saidwork"
+description = "Record speech, transcribe it and rewrite it into Markdown notes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+saidwork-kernel.workspace = true
+saidwork-app.workspace = true
+saidwork-tui.workspace = true
+saidwork-capture.workspace = true
+saidwork-formats.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+
+[lints]
+workspace = true
