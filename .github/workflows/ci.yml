@@ -19,7 +19,7 @@ jobs:
     name: fmt, clippy, test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install libpulse headers
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpulse-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
@@ -34,7 +34,7 @@ jobs:
     name: MSRV build (1.89)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install libpulse headers
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpulse-dev pkg-config
       - uses: dtolnay/rust-toolchain@master
