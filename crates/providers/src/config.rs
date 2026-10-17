@@ -49,6 +49,9 @@ pub struct LaunchConfig {
     pub stop_on_exit: bool,
     #[serde(default)]
     pub log_file: Option<PathBuf>,
+    /// Files the server needs, such as a model; checked before launching.
+    #[serde(default)]
+    pub requires: Vec<PathBuf>,
 }
 
 fn default_startup_timeout_secs() -> u64 {
@@ -108,6 +111,7 @@ impl LaunchConfig {
             startup_timeout: Duration::from_secs(self.startup_timeout_secs),
             stop_on_exit: self.stop_on_exit,
             log_file: self.log_file.clone(),
+            required_files: self.requires.clone(),
         }
     }
 }
@@ -181,6 +185,7 @@ mod tests {
             command = "ollama"
             args = ["serve"]
             env = { OLLAMA_KEEP_ALIVE = "10m" }
+            requires = ["/models/a.bin"]
             "#,
         );
         let spec = cfg.resolve("ollama", |_| None).unwrap().launch.unwrap();
@@ -190,6 +195,7 @@ mod tests {
         assert_eq!(spec.startup_timeout, Duration::from_secs(60));
         assert!(spec.stop_on_exit);
         assert!(spec.health_path.is_none());
+        assert_eq!(spec.required_files, [PathBuf::from("/models/a.bin")]);
     }
 
     #[test]

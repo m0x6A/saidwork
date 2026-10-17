@@ -1,11 +1,13 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use saidwork_capture::AudioBackend;
 use saidwork_formats::{BuiltinSync, FormatError, FsFormatRepository};
-use saidwork_kernel::{AppPaths, SystemClock};
+use saidwork_kernel::{AppPaths, SystemClock, expand_tilde};
 use saidwork_notes::FsNoteStore;
 use saidwork_providers::{
     HttpHealthProbe, ProviderError, ProviderName, ProviderSupervisor, TokioLauncher,
+    http_client_available,
 };
 
 use crate::capture_service::CaptureService;
@@ -13,6 +15,28 @@ use crate::config::Config;
 use crate::factory::{build_rewriter, build_transcriber};
 use crate::format_drafts::FormatDrafts;
 use crate::pipeline::Pipeline;
+
+/// `{share}/<file>` in a launch command or argument names a file shipped with saidwork,
+/// looked up in [`AppPaths::resource_dirs`].
+pub const SHARE_PLACEHOLDER: &str = "{share}";
+
+/// Expand `~` and `{share}/…` in one launch command or argument. Shipped files are
+/// recorded in `required` so a missing one is reported before launching; one that is
+/// not found keeps its `{share}/…` spelling so the report names it.
+fn resolve_launch_word(word: &str, paths: &AppPaths, required: &mut Vec<PathBuf>) -> String {
+    let Some(relative) = word
+        .strip_prefix(SHARE_PLACEHOLDER)
+        .and_then(|r| r.strip_prefix('/'))
+    else {
+        return expand_tilde(Path::new(word)).display().to_string();
+    };
+    let path = paths
+        .find_resource(Path::new(relative))
+        .unwrap_or_else(|| PathBuf::from(word));
+    let resolved = path.display().to_string();
+    required.push(path);
+    resolved
+}
 
 /// Errors while assembling the application.
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +47,11 @@ pub enum BootstrapError {
     Format(#[from] FormatError),
     #[error("no audio backend is available on this platform")]
     NoAudioBackend,
+    #[error(
+        "cannot make HTTP requests: {0}; install the system CA certificates (`{fix}`)",
+        fix = crate::requirements::CA_CERTIFICATES.install_steps(crate::requirements::Distro::detect())
+    )]
+    NoTls(String),
 }
 
 /// The assembled application: everything a user interface needs.
@@ -45,6 +74,7 @@ impl App {
         paths: AppPaths,
         backend: Arc<dyn AudioBackend>,
     ) -> Result<Self, BootstrapError> {
+        http_client_available().map_err(BootstrapError::NoTls)?;
         let in_use = [
             config.pipeline.transcriber.as_str(),
             config.pipeline.rewriter.as_str(),
@@ -63,18 +93,21 @@ impl App {
                 Err(err) => return Err(err.into()),
             };
             if let Some(launch) = provider.launch.as_mut() {
-                launch.command =
-                    saidwork_kernel::expand_tilde(std::path::Path::new(&launch.command))
-                        .display()
-                        .to_string();
+                let declared = std::mem::take(&mut launch.required_files);
+                let required = &mut launch.required_files;
+                for file in &declared {
+                    let recorded = required.len();
+                    let word = resolve_launch_word(&file.to_string_lossy(), &paths, required);
+                    // `{share}/…` entries are recorded by the resolution itself.
+                    if required.len() == recorded {
+                        required.push(PathBuf::from(word));
+                    }
+                }
+                launch.command = resolve_launch_word(&launch.command, &paths, required);
                 launch.args = launch
                     .args
                     .iter()
-                    .map(|a| {
-                        saidwork_kernel::expand_tilde(std::path::Path::new(a))
-                            .display()
-                            .to_string()
-                    })
+                    .map(|a| resolve_launch_word(a, &paths, required))
                     .collect();
                 if launch.log_file.is_none() {
                     launch.log_file =
@@ -200,6 +233,19 @@ mod tests {
             !launch.args.iter().any(|a| a.starts_with('~')),
             "tilde expanded in args"
         );
+        let pianissimo = app
+            .pipeline
+            .supervisor
+            .get(&ProviderName::new("pianissimo").unwrap())
+            .unwrap()
+            .launch
+            .clone()
+            .unwrap();
+        assert!(
+            pianissimo.required_files[0].ends_with("pianissimo-server/server.py"),
+            "{:?}",
+            pianissimo.required_files
+        );
         let names: Vec<_> = app
             .pipeline
             .supervisor
@@ -211,6 +257,73 @@ mod tests {
             "{names:?}"
         );
         app.shutdown().await;
+    }
+
+    #[test]
+    fn share_placeholder_resolves_to_a_shipped_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = AppPaths::rooted_at(tmp.path());
+        let script = tmp.path().join("share/pianissimo-server/server.py");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, "").unwrap();
+
+        let mut required = Vec::new();
+        let word =
+            resolve_launch_word("{share}/pianissimo-server/server.py", &paths, &mut required);
+        assert_eq!(word, script.display().to_string());
+        assert_eq!(required, [script]);
+
+        let missing = resolve_launch_word("{share}/nope/x.py", &paths, &mut required);
+        assert_eq!(missing, "{share}/nope/x.py");
+        assert_eq!(required[1], PathBuf::from("{share}/nope/x.py"));
+
+        assert_eq!(
+            resolve_launch_word("--port", &paths, &mut required),
+            "--port"
+        );
+        assert_eq!(required.len(), 2, "plain words are not required files");
+    }
+
+    #[test]
+    fn declared_requirements_are_expanded_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let toml = r#"
+            [pipeline]
+            transcriber = "w"
+            rewriter = "w"
+            [providers.w]
+            kind = "openai-compatible"
+            base_url = "http://127.0.0.1:9"
+            model = "m"
+            [providers.w.launch]
+            command = "whisper-server"
+            args = ["-m", "~/models/x.bin"]
+            requires = ["~/models/x.bin", "{share}/pianissimo-server/server.py"]
+        "#;
+        let config = Config::parse(toml, Path::new("t")).unwrap();
+        let app = App::build(
+            config,
+            AppPaths::rooted_at(tmp.path()),
+            Arc::new(FakeBackend::new()),
+        )
+        .unwrap();
+        let launch = app
+            .pipeline
+            .supervisor
+            .get(&ProviderName::new("w").unwrap())
+            .unwrap()
+            .launch
+            .clone()
+            .unwrap();
+        assert_eq!(
+            launch.required_files.len(),
+            2,
+            "{:?}",
+            launch.required_files
+        );
+        assert!(!launch.required_files[0].starts_with("~"));
+        assert!(launch.required_files[0].ends_with("models/x.bin"));
+        assert!(launch.required_files[1].ends_with("pianissimo-server/server.py"));
     }
 
     #[test]

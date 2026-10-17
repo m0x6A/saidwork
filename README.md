@@ -25,16 +25,30 @@ saidwork record     # headless: Enter stops, note path is printed
 Local servers can be started on demand: give a provider a `launch` block and saidwork
 spawns it when it is not answering, waits for the health check, and stops it on exit.
 
-## Install (Fedora)
+## Install
+
+Each [GitHub release](https://github.com/m0x6A/saidwork/releases) ships x86_64 Linux
+packages that pull in the one runtime library, libpulse, for you:
 
 ```sh
-sudo dnf install rustup pulseaudio-libs-devel   # libpulse headers for the capture backend
-rustup-init -y && source ~/.cargo/env
-cargo install --path crates/saidwork
-saidwork config init                           # writes ~/.config/saidwork/saidwork.toml + formats
+sudo dnf install ./saidwork-*.x86_64.rpm      # Fedora, RHEL, openSUSE (zypper install)
+sudo apt install ./saidwork_*_amd64.deb       # Debian, Ubuntu
+./install.sh                                  # from the tarball, any other distro
 ```
 
-Edit the providers in `saidwork.toml` (see `config/saidwork.example.toml`), then:
+Then pick a configuration and let saidwork tell you what else to install:
+
+```sh
+saidwork config presets                        # local, whisper-ollama, openai
+saidwork config init                           # writes ~/.config/saidwork/saidwork.toml + formats
+saidwork doctor                                # checks audio, providers and their dependencies
+```
+
+[docs/INSTALL.md](docs/INSTALL.md) is the full guide: building from source, what each
+preset needs and how to install it, where files live, and troubleshooting.
+
+Edit the providers in `saidwork.toml` (see `config/saidwork.example.toml` and
+`config/presets/`), then:
 
 ```sh
 saidwork providers status        # probe endpoints
@@ -51,18 +65,20 @@ Logs go to `~/.local/share/saidwork/saidwork.log` (`RUST_LOG=debug` for more). S
 The example config is wired for a fully local, Swedish-first setup:
 
 - **Transcription: Klang Pianissimo** ([`KlangAI/pianissimo-sv`](https://huggingface.co/KlangAI/pianissimo-sv),
-  a Parakeet v3 fine-tune, CC BY 4.0) served by `tools/pianissimo-server/server.py`, a
+  a Parakeet v3 fine-tune, CC BY 4.0) served by `tools/pianissimo-server/server.py`
+  (installed as `/usr/share/saidwork/pianissimo-server/server.py`), a
   small OpenAI-compatible server around [`onnx-asr`](https://github.com/istupakov/onnx-asr)
   and Klang's int8 ONNX export. It runs on the CPU at roughly 35× realtime, splits long
   recordings at pauses with Silero VAD, and needs only [`uv`](https://docs.astral.sh/uv/):
-  saidwork starts it with `uv run …/server.py --port 8178` and the first start downloads
-  about 660 MB.
-- **Rewriting: Gemma 4 12B on llama.cpp** (ROCm/HIP build) through an OpenAI-compatible
-  `llama-server` on port 8080, started on demand with `--reasoning-budget 0` so the answer
-  is the note itself rather than its reasoning.
+  saidwork starts it with `uv run {share}/pianissimo-server/server.py --port 8178` and the
+  first start downloads about 660 MB.
+- **Rewriting: Gemma 4 12B on llama.cpp** through an OpenAI-compatible `llama-server` on
+  port 8080, started on demand with `-hf ggml-org/gemma-4-12B-it-GGUF:Q4_0` (downloaded on
+  the first start) and `--reasoning-budget 0` so the answer is the note itself rather than
+  its reasoning.
 
-Swap either for whisper.cpp, Ollama or a hosted API by editing the provider block; the
-example file shows the shapes.
+Swap either for whisper.cpp, Ollama or a hosted API by editing the provider block, or
+start from another preset (`saidwork config presets`); `config/presets/` shows the shapes.
 
 ## Formats
 
@@ -142,8 +158,9 @@ Tests use fakes for audio, transcription and rewriting, `wiremock` for the HTTP
 adapters, `insta` snapshots for prompts and screens, and `proptest` for the mixer.
 
 CI (`.github/workflows/ci.yml`) runs the same checks plus an MSRV build on every push and
-pull request. Pushing a `v*` tag builds a release tarball for x86_64 Linux and attaches it
-to a GitHub release:
+pull request. Pushing a `v*` tag builds the x86_64 Linux tarball, `.deb` and `.rpm`
+(`packaging/install.sh`, `[package.metadata.deb]` and `[package.metadata.generate-rpm]` in
+`crates/saidwork/Cargo.toml`) and attaches them to a GitHub release:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0

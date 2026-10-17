@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::domain::{Provider, ProviderError, ProviderName};
+use crate::domain::{MissingRequirement, Provider, ProviderError, ProviderName};
 use crate::ports::{HealthProbe, ManagedProcess, ProcessLauncher};
 
 /// Observed state of a provider.
@@ -85,6 +85,20 @@ impl ProviderSupervisor {
         })
     }
 
+    /// What the provider's launch command needs that is not installed; empty for
+    /// providers without a launch block.
+    pub fn missing_requirements(
+        &self,
+        name: &ProviderName,
+    ) -> Result<Vec<MissingRequirement>, ProviderError> {
+        Ok(self
+            .get(name)?
+            .launch
+            .as_ref()
+            .map(|spec| self.launcher.missing(spec))
+            .unwrap_or_default())
+    }
+
     /// Make sure the provider answers, launching it if it is configured to be launchable.
     pub async fn ensure_running(&self, name: &ProviderName) -> Result<Readiness, ProviderError> {
         let provider = self.get(name)?;
@@ -108,6 +122,12 @@ impl ProviderSupervisor {
                     .map(|()| Readiness::Started);
             }
             running.remove(name);
+        }
+        if let Some(missing) = self.launcher.missing(spec).into_iter().next() {
+            return Err(ProviderError::Missing {
+                name: name.clone(),
+                missing,
+            });
         }
         tracing::info!(provider = %name, command = %spec.command, "launching provider");
         let process = self.launcher.spawn(spec).await?;
@@ -242,6 +262,7 @@ mod tests {
         spawned: StdMutex<Vec<String>>,
         terminated: Arc<AtomicUsize>,
         exits_immediately: bool,
+        missing: Vec<MissingRequirement>,
     }
 
     impl FakeLauncher {
@@ -250,6 +271,7 @@ mod tests {
                 spawned: StdMutex::new(vec![]),
                 terminated: Arc::new(AtomicUsize::new(0)),
                 exits_immediately: false,
+                missing: vec![],
             })
         }
     }
@@ -262,6 +284,10 @@ mod tests {
                 exited: self.exits_immediately,
                 terminated: self.terminated.clone(),
             }))
+        }
+
+        fn missing(&self, _spec: &LaunchSpec) -> Vec<MissingRequirement> {
+            self.missing.clone()
         }
     }
 
@@ -293,6 +319,34 @@ mod tests {
 
     fn name(s: &str) -> ProviderName {
         ProviderName::new(s).unwrap()
+    }
+
+    #[tokio::test]
+    async fn missing_requirement_is_reported_instead_of_launching() {
+        let launcher = Arc::new(FakeLauncher {
+            missing: vec![MissingRequirement::Command("uv".into())],
+            ..Arc::into_inner(FakeLauncher::new()).unwrap()
+        });
+        let sup = supervisor(
+            vec![launchable("p", 50), provider("remote", None)],
+            ScriptedProbe::new(&[false]),
+            launcher.clone(),
+        );
+        assert_eq!(
+            sup.missing_requirements(&name("p")).unwrap(),
+            [MissingRequirement::Command("uv".into())]
+        );
+        assert_eq!(sup.missing_requirements(&name("remote")).unwrap(), []);
+        let err = sup.ensure_running(&name("p")).await.unwrap_err();
+        assert!(
+            matches!(&err, ProviderError::Missing { missing: MissingRequirement::Command(c), .. } if c == "uv"),
+            "{err}"
+        );
+        assert_eq!(
+            err.to_string(),
+            "provider `p` cannot be started: `uv` is not installed (not found on PATH)"
+        );
+        assert!(launcher.spawned.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

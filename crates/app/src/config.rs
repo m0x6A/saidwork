@@ -8,6 +8,39 @@ use serde::Deserialize;
 /// The shipped example configuration; also used as the template for `config init`.
 pub const EXAMPLE_CONFIG: &str = include_str!("../../../config/saidwork.example.toml");
 
+/// A complete configuration `config init --preset` can start from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Preset {
+    pub id: &'static str,
+    pub description: &'static str,
+    pub toml: &'static str,
+}
+
+/// The shipped presets; the first is the default.
+pub const PRESETS: &[Preset] = &[
+    Preset {
+        id: "local",
+        description: "Swedish, fully local: Pianissimo (uv) + Gemma 4 on llama-server",
+        toml: EXAMPLE_CONFIG,
+    },
+    Preset {
+        id: "whisper-ollama",
+        description: "any language, fully local: whisper.cpp server + Ollama",
+        toml: include_str!("../../../config/presets/whisper-ollama.toml"),
+    },
+    Preset {
+        id: "openai",
+        description: "hosted: OpenAI transcription and chat (needs OPENAI_API_KEY)",
+        toml: include_str!("../../../config/presets/openai.toml"),
+    },
+];
+
+/// Look up a preset by id.
+#[must_use]
+pub fn preset(id: &str) -> Option<&'static Preset> {
+    PRESETS.iter().find(|p| p.id == id)
+}
+
 /// Top-level configuration file.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -170,6 +203,31 @@ mod tests {
         assert!(cfg.providers["pianissimo"].launch.is_some());
         assert_eq!(cfg.pipeline.language.as_deref(), Some("sv"));
         assert_eq!(cfg.capture.microphone, DeviceChoice::Default);
+    }
+
+    #[test]
+    fn every_preset_parses_and_validates() {
+        assert_eq!(PRESETS[0].toml, EXAMPLE_CONFIG);
+        for p in PRESETS {
+            let cfg = Config::parse(p.toml, Path::new(p.id)).unwrap_or_else(|e| panic!("{e}"));
+            assert!(
+                p.toml.contains(&format!("--preset {}", p.id)) || p.id == "local",
+                "preset {} documents how to select it",
+                p.id
+            );
+            assert!(cfg.pipeline.default_format.is_some(), "{}", p.id);
+        }
+        assert_eq!(preset("openai").unwrap().id, "openai");
+        assert!(preset("nope").is_none());
+    }
+
+    #[test]
+    fn example_config_has_no_machine_specific_paths() {
+        assert!(
+            !EXAMPLE_CONFIG.contains("develop/"),
+            "points into a source checkout"
+        );
+        assert!(EXAMPLE_CONFIG.contains("{share}/pianissimo-server/server.py"));
     }
 
     #[test]

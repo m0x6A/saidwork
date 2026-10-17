@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use url::Url;
 
-use crate::domain::{LaunchSpec, ProviderError};
+use crate::domain::{LaunchSpec, MissingRequirement, ProviderError};
 
 /// Decides whether a provider is answering.
 #[async_trait]
@@ -27,4 +27,9 @@ pub trait ManagedProcess: Send + Sync + Debug {
 #[async_trait]
 pub trait ProcessLauncher: Send + Sync {
     async fn spawn(&self, spec: &LaunchSpec) -> Result<Box<dyn ManagedProcess>, ProviderError>;
+
+    /// What `spec` needs that this machine lacks; checked before every launch.
+    fn missing(&self, _spec: &LaunchSpec) -> Vec<MissingRequirement> {
+        Vec::new()
+    }
 }

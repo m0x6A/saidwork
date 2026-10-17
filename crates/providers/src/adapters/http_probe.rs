@@ -5,6 +5,14 @@ use url::Url;
 
 use crate::ports::HealthProbe;
 
+/// Can an HTTP client be built here? It cannot when the system has no CA certificates,
+/// and every HTTP adapter would then panic on construction, so the app checks first.
+pub fn http_client_available() -> Result<(), String> {
+    reqwest::Client::builder().build().map(drop).map_err(|e| {
+        std::error::Error::source(&e).map_or_else(|| e.to_string(), ToString::to_string)
+    })
+}
+
 /// Probe that issues an HTTP `GET` and treats any response as "up".
 #[derive(Debug, Clone)]
 pub struct HttpHealthProbe {
