@@ -10,8 +10,10 @@ mod domain;
 mod ports;
 mod supervisor;
 
-pub use adapters::{HttpHealthProbe, TokioLauncher};
+pub use adapters::{HttpHealthProbe, TokioLauncher, http_client_available};
 pub use config::{LaunchConfig, ProviderConfig};
-pub use domain::{LaunchSpec, Provider, ProviderError, ProviderKind, ProviderName};
+pub use domain::{
+    LaunchSpec, MissingRequirement, Provider, ProviderError, ProviderKind, ProviderName,
+};
 pub use ports::{HealthProbe, ManagedProcess, ProcessLauncher};
 pub use supervisor::{ProviderStatus, ProviderSupervisor, Readiness};

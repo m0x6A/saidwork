@@ -21,3 +21,35 @@ tracing-appender.workspace = true
 
 [lints]
 workspace = true
+
+# `cargo deb` / `cargo generate-rpm` (run by the release workflow). Both packages declare
+# libpulse, so apt/dnf pull it in; formats and the example config are built into the binary.
+[package.metadata.deb]
+maintainer = "Mattias Jonsson <xdr@xdr.nu>"
+section = "sound"
+depends = "$auto, libpulse0, ca-certificates"
+recommends = "pipewire-pulse | pulseaudio"
+extended-description = "A terminal app that records speech, transcribes it and rewrites it into Markdown notes."
+assets = [
+    ["target/release/saidwork", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/saidwork/", "644"],
+    ["../../docs/INSTALL.md", "usr/share/doc/saidwork/", "644"],
+    ["../../config/saidwork.example.toml", "usr/share/doc/saidwork/examples/", "644"],
+    ["../../config/presets/*.toml", "usr/share/doc/saidwork/examples/presets/", "644"],
+    ["../../tools/pianissimo-server/server.py", "usr/share/saidwork/pianissimo-server/", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "Record speech, transcribe it and rewrite it into Markdown notes"
+auto-req = "no"
+requires = { "libpulse-simple.so.0()(64bit)" = "*", "libpulse.so.0()(64bit)" = "*", "ca-certificates" = "*" }
+assets = [
+    { source = "target/release/saidwork", dest = "/usr/bin/saidwork", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/saidwork/README.md", mode = "644", doc = true },
+    { source = "docs/INSTALL.md", dest = "/usr/share/doc/saidwork/INSTALL.md", mode = "644", doc = true },
+    { source = "config/saidwork.example.toml", dest = "/usr/share/doc/saidwork/examples/saidwork.example.toml", mode = "644", doc = true },
+    { source = "config/presets/*.toml", dest = "/usr/share/doc/saidwork/examples/presets/", mode = "644", doc = true },
+    { source = "LICENSE-MIT", dest = "/usr/share/licenses/saidwork/LICENSE-MIT", mode = "644", doc = true },
+    { source = "LICENSE-APACHE", dest = "/usr/share/licenses/saidwork/LICENSE-APACHE", mode = "644", doc = true },
+    { source = "tools/pianissimo-server/server.py", dest = "/usr/share/saidwork/pianissimo-server/server.py", mode = "644" },
+]

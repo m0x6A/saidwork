@@ -1,4 +1,7 @@
 # saidwork configuration. Copy to ~/.config/saidwork/saidwork.toml (or run `saidwork config init`).
+# This is the "local" preset: Swedish transcription with Pianissimo and rewriting with Gemma on
+# llama.cpp, both on this machine. `saidwork config presets` lists the others and
+# `saidwork doctor` checks that everything below is installed.
 
 [capture]
 # "default", "none", or a device id as printed by `saidwork devices`.
@@ -26,45 +29,59 @@ language = "sv"
 # Providers. `base_url` is the server root; the API paths (/v1/..., /api/...)
 # are appended by saidwork. API keys come from the environment via `api_key_env`.
 # A `launch` block makes saidwork start the server when it is not answering.
+# In `command` and `args`, `~` is your home directory and `{share}/<file>` is a file
+# shipped with saidwork (/usr/share/saidwork, ~/.local/share/saidwork, ...).
+# `requires = ["~/models/x.gguf", ...]` lists files (models, scripts) that must exist;
+# `saidwork doctor` and every launch check them first.
 # ---------------------------------------------------------------------------
 
-# Klang Pianissimo (Swedish speech-to-text, KlangAI/pianissimo-sv-onnx) served by
-# tools/pianissimo-server/server.py through onnx-asr on the CPU. First start downloads
-# the model (~660 MB); `uv` creates the Python environment on demand.
+# Klang Pianissimo (Swedish speech-to-text, KlangAI/pianissimo-sv-onnx) served by the
+# bundled pianissimo-server/server.py through onnx-asr on the CPU. Needs `uv`; the first
+# start creates the Python environment and downloads the model (~660 MB).
 [providers.pianissimo]
 kind = "openai-compatible"
 base_url = "http://127.0.0.1:8178"
 model = "pianissimo-sv"          # informational; the server has one model
 [providers.pianissimo.launch]
 command = "uv"
-args = ["run", "~/develop/saidwork/tools/pianissimo-server/server.py", "--port", "8178"]
+args = ["run", "{share}/pianissimo-server/server.py", "--port", "8178"]
 health_path = "/health"
 startup_timeout_secs = 600       # generous for the first-run download
 stop_on_exit = true
 
-# Gemma 4 12B on llama.cpp (ROCm/HIP build), started through the ada project's wrapper.
-# `--reasoning-budget 0` turns thinking off so the reply is the finished note.
+# Gemma 4 12B on llama.cpp's llama-server. `-hf` downloads the model from Hugging Face
+# on the first start (~7 GB, cached in ~/.cache/llama.cpp); `-ngl 999` offloads every
+# layer to the GPU (drop it on CPU-only machines). `--reasoning-budget 0` turns thinking
+# off so the reply is the finished note. Point `command` at your own wrapper script if you
+# already run llama-server with other settings.
 [providers.gemma-local]
 kind = "openai-compatible"
 base_url = "http://127.0.0.1:8080"
 model = "gemma-4-12B-it"         # llama-server ignores the name; required by the API
 [providers.gemma-local.launch]
-command = "~/develop/Projects/ada/scripts/llama-server.sh"
-args = ["--reasoning-budget", "0"]
+command = "llama-server"
+args = [
+    "-hf", "ggml-org/gemma-4-12B-it-GGUF:Q4_0",
+    "--host", "127.0.0.1", "--port", "8080",
+    "-ngl", "999", "-c", "32768", "-fa", "on",
+    "--jinja", "--reasoning-format", "deepseek", "--reasoning-budget", "0",
+]
 health_path = "/health"
-startup_timeout_secs = 120
+startup_timeout_secs = 1800      # generous for the first-run download
 stop_on_exit = true
 
-# Alternatives --------------------------------------------------------------
+# Alternatives (`saidwork config presets` has complete configurations) -------
 
-# whisper.cpp's server, if you build it (also speaks the OpenAI transcription API).
+# whisper.cpp's server, if you build it; `--inference-path` makes it speak the OpenAI
+# transcription API.
 # [providers.whisper-local]
 # kind = "openai-compatible"
 # base_url = "http://127.0.0.1:8179"
 # model = "whisper-1"
 # [providers.whisper-local.launch]
 # command = "whisper-server"
-# args = ["--host", "127.0.0.1", "--port", "8179", "-m", "~/.local/share/whisper/ggml-large-v3-turbo.bin"]
+# args = ["--host", "127.0.0.1", "--port", "8179", "--inference-path", "/v1/audio/transcriptions",
+#         "-m", "~/.local/share/whisper/ggml-large-v3-turbo.bin"]
 
 # Ollama (native API), e.g. `sudo dnf install ollama` on Fedora.
 # [providers.ollama]

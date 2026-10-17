@@ -5,12 +5,15 @@ use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
+use saidwork_app::requirements::{CA_CERTIFICATES, Distro};
 use saidwork_app::{
-    App, Config, DeviceSelection, DraftOutcome, EXAMPLE_CONFIG, FormatDraft, FormatId,
-    FormatRepository, ProviderName, ProviderStatus, SessionEvent, SourceKind, default_backend,
+    App, BootstrapError, Check, CheckStatus, Config, DeviceSelection, DraftOutcome, FormatDraft,
+    FormatId, FormatRepository, PRESETS, ProviderError, ProviderName, ProviderStatus, SessionEvent,
+    SourceKind, check_audio, default_backend, http_client_available,
 };
 use saidwork_capture::{AudioBackend, FakeBackend};
 use saidwork_kernel::AppPaths;
+
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 /// Record speech, transcribe it and rewrite it into Markdown notes.
@@ -59,6 +62,8 @@ enum Command {
     },
     /// List capturable audio devices.
     Devices,
+    /// Check that audio, the configured providers and what they need are installed.
+    Doctor,
     /// Manage format templates.
     Formats {
         #[command(subcommand)]
@@ -105,7 +110,12 @@ enum ConfigCommand {
         /// Overwrite an existing configuration file.
         #[arg(long)]
         force: bool,
+        /// Which preset to start from (see `config presets`).
+        #[arg(long, default_value = "local")]
+        preset: String,
     },
+    /// List the configuration presets `config init --preset` can start from.
+    Presets,
     /// Print the configuration file path.
     Path,
 }
@@ -129,9 +139,18 @@ pub async fn run() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Config {
-            command: ConfigCommand::Init { force },
-        } => config_init(&ctx.config_path, &ctx.paths, force),
+            command: ConfigCommand::Init { force, preset },
+        } => config_init(&ctx.config_path, &ctx.paths, force, &preset),
+        Command::Config {
+            command: ConfigCommand::Presets,
+        } => {
+            for p in PRESETS {
+                println!("{:<16} {}", p.id, p.description);
+            }
+            Ok(())
+        }
         Command::Devices => devices(),
+        Command::Doctor => doctor(&ctx).await,
         Command::Tui => {
             // The TUI shows the format warnings in its log; stderr would be painted over.
             let app = load_app(&ctx.config_path, &ctx.paths, default_backend()?)?;
@@ -154,11 +173,14 @@ pub async fn run() -> anyhow::Result<()> {
                 None => (default_backend()?, false),
             };
             let app = ctx.app(backend)?;
+            let pipeline = &app.pipeline;
+            require_ready(&app, &[&pipeline.transcriber_name, &pipeline.rewriter_name]).await?;
             let note = with_shutdown(&app, record(&app, format, context, fake)).await?;
             review_note(review, &note).await
         }
         Command::Transcribe { file } => {
             let app = ctx.headless_app()?;
+            require_ready(&app, &[&app.pipeline.transcriber_name]).await?;
             with_shutdown(&app, transcribe(&app, &file)).await
         }
         Command::Rewrite {
@@ -168,6 +190,7 @@ pub async fn run() -> anyhow::Result<()> {
             review,
         } => {
             let app = ctx.headless_app()?;
+            require_ready(&app, &[&app.pipeline.rewriter_name]).await?;
             let note = with_shutdown(&app, rewrite(&app, &file, format, context)).await?;
             review_note(review, &note).await
         }
@@ -209,6 +232,117 @@ impl Context_ {
     /// An app that never touches audio hardware.
     fn headless_app(&self) -> anyhow::Result<App> {
         self.app(Arc::new(FakeBackend::new()))
+    }
+}
+
+/// Stop before doing any work if a provider in `names` cannot be started, and say how
+/// to fix it.
+async fn require_ready(app: &App, names: &[&ProviderName]) -> anyhow::Result<()> {
+    let failures: Vec<Check> = app
+        .preflight()
+        .await
+        .into_iter()
+        .filter(|c| c.provider.as_ref().is_none_or(|p| names.contains(&p)))
+        .collect();
+    if failures.is_empty() {
+        return Ok(());
+    }
+    for check in &failures {
+        eprintln!("{check}");
+    }
+    bail!(
+        "saidwork is not ready; fix the problems above (`saidwork doctor` checks everything, \
+         {INSTALL_GUIDE} explains the setup)"
+    )
+}
+
+const INSTALL_GUIDE: &str = "https://github.com/m0x6A/saidwork/blob/main/docs/INSTALL.md";
+
+/// Report on everything saidwork needs; fails if anything blocks recording.
+async fn doctor(ctx: &Context_) -> anyhow::Result<()> {
+    let distro = Distro::detect();
+    let mut checks = Vec::new();
+    if let Err(err) = http_client_available() {
+        checks.push(Check {
+            subject: "https".into(),
+            status: CheckStatus::Fail,
+            detail: format!("cannot make HTTP requests: {err}"),
+            fix: Some(CA_CERTIFICATES.install_steps(distro).to_owned()),
+            provider: None,
+        });
+    }
+    let app = match Config::load(&ctx.config_path) {
+        Ok(config) => match App::build(config, ctx.paths.clone(), Arc::new(FakeBackend::new())) {
+            Ok(app) => {
+                checks.push(config_check(
+                    CheckStatus::Ok,
+                    ctx.config_path.display().to_string(),
+                    None,
+                ));
+                Some(app)
+            }
+            // Already reported by the https check above.
+            Err(BootstrapError::NoTls(_)) => None,
+            Err(err) => {
+                let fix = match &err {
+                    BootstrapError::Provider(ProviderError::MissingApiKeyEnv { var, .. }) => {
+                        format!("`export {var}=<your key>` before starting saidwork")
+                    }
+                    _ => format!("edit {}", ctx.config_path.display()),
+                };
+                checks.push(config_check(CheckStatus::Fail, err.to_string(), Some(&fix)));
+                None
+            }
+        },
+        Err(err) => {
+            checks.push(config_check(
+                CheckStatus::Fail,
+                err.to_string(),
+                Some("`saidwork config init` (`saidwork config presets` lists the choices)"),
+            ));
+            None
+        }
+    };
+    match default_backend() {
+        Ok(backend) => checks.push(check_audio(backend.as_ref(), distro)),
+        Err(err) => checks.push(Check {
+            subject: "audio".into(),
+            status: CheckStatus::Fail,
+            detail: err.to_string(),
+            fix: None,
+            provider: None,
+        }),
+    }
+    if let Some(app) = &app {
+        checks.extend(app.check_providers(distro).await);
+        for warning in app.format_warnings() {
+            checks.push(Check {
+                subject: "formats".into(),
+                status: CheckStatus::Warn,
+                detail: warning,
+                fix: None,
+                provider: None,
+            });
+        }
+    }
+    for check in &checks {
+        println!("{check}");
+    }
+    let failures = checks.iter().filter(|c| c.is_failure()).count();
+    if failures > 0 {
+        bail!("{failures} problem(s) found; the install guide is at {INSTALL_GUIDE}");
+    }
+    println!("everything saidwork needs is in place");
+    Ok(())
+}
+
+fn config_check(status: CheckStatus, detail: String, fix: Option<&str>) -> Check {
+    Check {
+        subject: "config".into(),
+        status,
+        detail,
+        fix: fix.map(str::to_owned),
+        provider: None,
     }
 }
 
@@ -394,7 +528,19 @@ fn load_app(
     Ok(App::build(config, paths.clone(), backend)?)
 }
 
-fn config_init(config_path: &Path, paths: &AppPaths, force: bool) -> anyhow::Result<()> {
+fn config_init(
+    config_path: &Path,
+    paths: &AppPaths,
+    force: bool,
+    preset: &str,
+) -> anyhow::Result<()> {
+    let Some(preset) = saidwork_app::preset(preset) else {
+        let ids: Vec<_> = PRESETS.iter().map(|p| p.id).collect();
+        bail!(
+            "unknown preset `{preset}`; choose one of {}",
+            ids.join(", ")
+        );
+    };
     if config_path.exists() && !force {
         bail!(
             "{} already exists; pass --force to overwrite",
@@ -404,8 +550,8 @@ fn config_init(config_path: &Path, paths: &AppPaths, force: bool) -> anyhow::Res
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(config_path, EXAMPLE_CONFIG)?;
-    println!("wrote {}", config_path.display());
+    std::fs::write(config_path, preset.toml)?;
+    println!("wrote {} (preset {})", config_path.display(), preset.id);
     let formats = saidwork_formats::FsFormatRepository::new(paths.formats_dir());
     let sync = formats.ensure_initialised()?;
     println!(
@@ -413,7 +559,7 @@ fn config_init(config_path: &Path, paths: &AppPaths, force: bool) -> anyhow::Res
         formats.dir().display(),
         sync.written.len()
     );
-    println!("edit the providers section, then run `saidwork providers status`");
+    println!("edit the providers section if needed, then run `saidwork doctor`");
     Ok(())
 }
 

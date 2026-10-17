@@ -35,6 +35,18 @@ pub async fn run(app: App) -> Result<(), TuiError> {
     for warning in app.format_warnings() {
         model.push_log(format!("warning: {warning}"));
     }
+    let problems = app.preflight().await;
+    for check in &problems {
+        model.push_log(format!("error: {}: {}", check.subject, check.detail));
+        if let Some(fix) = &check.fix {
+            model.push_log(format!("  fix: {fix}"));
+        }
+    }
+    if !problems.is_empty() {
+        model.push_log(
+            "recording will fail until this is fixed; `saidwork doctor` checks everything",
+        );
+    }
     let terminal = ratatui::init();
     let result = event_loop(terminal, Arc::new(app), model).await;
     ratatui::restore();

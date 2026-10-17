@@ -1,0 +1,29 @@
+# saidwork "openai" preset: transcription and rewriting with OpenAI's hosted API.
+#   saidwork config init --preset openai
+#
+# Nothing to install beyond saidwork; export the key before starting:
+#   export OPENAI_API_KEY=sk-...
+# Any other OpenAI-compatible service (Groq, OpenRouter, a vLLM server, ...) works the
+# same way with its own base_url, model and key variable.
+
+[capture]
+microphone = "default"
+system_audio = "default"
+
+[pipeline]
+transcriber = "openai-stt"
+rewriter = "openai-chat"
+default_format = "meeting-notes"
+# language = "en"
+
+[providers.openai-stt]
+kind = "openai-compatible"
+base_url = "https://api.openai.com"
+model = "whisper-1"
+api_key_env = "OPENAI_API_KEY"
+
+[providers.openai-chat]
+kind = "openai-compatible"
+base_url = "https://api.openai.com"
+model = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"
