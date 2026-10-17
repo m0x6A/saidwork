@@ -6,6 +6,7 @@ mod capture_service;
 mod config;
 mod events;
 mod factory;
+mod format_drafts;
 mod pipeline;
 
 pub use bootstrap::{App, BootstrapError, default_backend};
@@ -16,6 +17,7 @@ pub use config::{
 };
 pub use events::SessionEvent;
 pub use factory::{build_rewriter, build_transcriber};
+pub use format_drafts::{DraftOutcome, FormatDraft, FormatDrafts};
 pub use pipeline::{Pipeline, SessionError, SessionOutcome};
 
 // Re-export the slice types the UIs need so they depend on `app` only.

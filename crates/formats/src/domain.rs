@@ -70,6 +70,8 @@ pub enum FormatError {
     EmptyTemplate { id: String },
     #[error("format `{id}` not found")]
     NotFound { id: String },
+    #[error("`{id}` is not a built-in format")]
+    NotBuiltin { id: String },
     #[error("could not read formats from `{path}`: {source}")]
     Io {
         path: String,

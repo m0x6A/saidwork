@@ -68,6 +68,12 @@ impl AppPaths {
         self.data_dir.join("sessions")
     }
 
+    /// Directory for format drafts being edited, so a rejected edit is never lost.
+    #[must_use]
+    pub fn drafts_dir(&self) -> PathBuf {
+        self.data_dir.join("drafts")
+    }
+
     /// Log file; the TUI owns the terminal so logs never go to stderr.
     #[must_use]
     pub fn log_file(&self) -> PathBuf {

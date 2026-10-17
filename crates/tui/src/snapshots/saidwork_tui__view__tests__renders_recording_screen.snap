@@ -19,4 +19,4 @@ expression: terminal.backend().to_string()
 "│                              ││                                                        │"
 "│                              ││                                                        │"
 "└──────────────────────────────┘└────────────────────────────────────────────────────────┘"
-" r record/stop   ↑/↓ format   m mic   s system audio   p probe providers   q quit         "
+" r record  ↑/↓ format  n new fmt  e edit fmt  o open note  m mic  s sys  p probe  q quit  "

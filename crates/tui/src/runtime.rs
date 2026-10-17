@@ -6,11 +6,12 @@ use std::time::Duration;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
 use saidwork_app::{
-    App, CaptureService, DeviceSelection, FormatId, ProviderStatus, RecorderHandle, SessionEvent,
+    App, CaptureService, DeviceSelection, DraftOutcome, FormatId, FormatRepository as _,
+    ProviderStatus, RecorderHandle, SessionEvent,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::model::{Cmd, Model, Msg, ProviderView};
+use crate::model::{Cmd, EditTarget, Model, Msg, ProviderView};
 use crate::view;
 
 /// Errors of the TUI.
@@ -26,9 +27,14 @@ const TICK: Duration = Duration::from_millis(100);
 
 /// Run the interactive interface until the user quits.
 pub async fn run(app: App) -> Result<(), TuiError> {
-    use saidwork_app::FormatRepository as _;
     let formats = app.formats.list()?;
-    let model = Model::new(formats, app.config.pipeline.default_format.as_deref());
+    let mut model = Model::new(formats, app.config.pipeline.default_format.as_deref());
+    for path in &app.builtin_formats.written {
+        model.push_log(format!("installed built-in format {}", path.display()));
+    }
+    for warning in app.format_warnings() {
+        model.push_log(format!("warning: {warning}"));
+    }
     let terminal = ratatui::init();
     let result = event_loop(terminal, Arc::new(app), model).await;
     ratatui::restore();
@@ -85,7 +91,13 @@ async fn event_loop(
         };
         let cmds = crate::model::update(&mut model, msg);
         for cmd in cmds {
-            rt.execute(cmd);
+            match cmd {
+                Cmd::Edit(target) => {
+                    let msg = edit_suspended(&mut terminal, &mut events, &app, target).await?;
+                    let _ = tx.send(msg);
+                }
+                cmd => rt.execute(cmd),
+            }
         }
         terminal.draw(|f| view::render(&model, f))?;
         if model.should_quit {
@@ -153,6 +165,7 @@ impl Runtime {
             }
             Cmd::StartRecording(selection) => self.start_recording(selection),
             Cmd::StopAndProcess(format) => self.stop_and_process(format),
+            Cmd::Edit(_) => unreachable!("the event loop opens the editor itself"),
             Cmd::Discard => {
                 if let Some(handle) = self.recorder.take() {
                     tokio::spawn(async move {
@@ -198,6 +211,76 @@ impl Runtime {
             let _ = tx.send(Msg::Finished(result.map_err(|e| e.to_string())));
         });
     }
+}
+
+/// Hand the terminal to the editor for `target`, then take it back.
+///
+/// Runs inline in the event loop: nothing may draw or read keys while the editor owns the
+/// terminal. Queued messages (pipeline events, a running recording's progress) are handled
+/// once it exits.
+async fn edit_suspended(
+    terminal: &mut ratatui::DefaultTerminal,
+    events: &mut EventStream,
+    app: &App,
+    target: EditTarget,
+) -> Result<Msg, TuiError> {
+    let with_path = |d: saidwork_app::FormatDraft| (Some(d.clone()), d.path);
+    let begun = match target {
+        EditTarget::NewFormat => app.drafts.begin_new().map(with_path),
+        EditTarget::Format(id) => app.drafts.begin_edit(&id).map(with_path),
+        EditTarget::Note(path) => Ok((None, path)),
+    };
+    let (draft, path) = match begun {
+        Ok(begun) => begun,
+        Err(e) => return Ok(Msg::Edited(format!("error: {e}"))),
+    };
+
+    // A fresh stream drops the old one, which stops crossterm reading stdin under the
+    // editor; the new one only starts reading when the loop polls it again.
+    *events = EventStream::new();
+    ratatui::restore();
+    let status = saidwork_kernel::open_in_editor(&path).await;
+    crossterm::terminal::enable_raw_mode()?;
+    crossterm::execute!(
+        std::io::stdout(),
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+    )?;
+    // A fresh terminal has empty buffers, so the next draw repaints everything.
+    // (`Terminal::clear` would query the cursor position, which some terminals never answer.)
+    *terminal = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
+
+    let editor = saidwork_kernel::resolve_editor();
+    match status {
+        Err(e) => {
+            return Ok(Msg::Edited(format!(
+                "error: could not start `{editor}`: {e}"
+            )));
+        }
+        Ok(s) if !s.success() => {
+            return Ok(Msg::Edited(format!(
+                "`{editor}` exited with {s}; nothing saved"
+            )));
+        }
+        Ok(_) => {}
+    }
+    let Some(draft) = draft else {
+        return Ok(Msg::Edited(format!("closed {}", path.display())));
+    };
+    Ok(match app.drafts.finish(&draft) {
+        Ok(DraftOutcome::Unchanged) => Msg::Edited("format unchanged".into()),
+        Ok(DraftOutcome::Saved(format)) => match app.formats.list() {
+            Ok(formats) => Msg::FormatSaved {
+                formats,
+                id: format.id,
+            },
+            Err(e) => Msg::Edited(format!("error: {e}")),
+        },
+        Err(e) => Msg::Edited(format!(
+            "format not saved: {e}; the draft is kept, press {} to fix it",
+            if draft.target.is_some() { 'e' } else { 'n' }
+        )),
+    })
 }
 
 fn forward_events(mut erx: UnboundedReceiver<SessionEvent>, tx: UnboundedSender<Msg>) {

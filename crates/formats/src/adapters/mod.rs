@@ -1,3 +1,3 @@
 mod fs;
 
-pub use fs::FsFormatRepository;
+pub use fs::{BuiltinSync, FsFormatRepository};

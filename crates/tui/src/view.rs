@@ -4,7 +4,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph};
 
 use crate::model::{Model, Phase};
 
@@ -99,7 +99,10 @@ fn render_session(model: &Model, frame: &mut Frame, area: Rect) {
             Color::Red,
         ),
         Phase::Processing => ("processing…".to_owned(), Color::Yellow),
-        Phase::Done { note_path } => (format!("saved {}", note_path.display()), Color::Green),
+        Phase::Done { note_path } => (
+            format!("saved (o to review) {}", note_path.display()),
+            Color::Green,
+        ),
         Phase::Failed { message } => (format!("failed: {message}"), Color::Red),
     };
     let device = |label: &str, d: &Option<saidwork_app::AudioDevice>| {
@@ -148,22 +151,29 @@ fn render_session(model: &Model, frame: &mut Frame, area: Rect) {
 }
 
 fn render_log(model: &Model, frame: &mut Frame, area: Rect) {
-    let visible = usize::from(area.height.saturating_sub(2));
-    let start = model.log.len().saturating_sub(visible);
-    let text: Vec<Line> = model.log[start..]
-        .iter()
-        .map(|l| Line::from(l.as_str()))
-        .collect();
-    frame.render_widget(
-        Paragraph::new(text)
-            .wrap(Wrap { trim: true })
-            .block(Block::default().borders(Borders::ALL).title(" Log ")),
-        area,
-    );
+    let block = Block::default().borders(Borders::ALL).title(" Log ");
+    let inner = block.inner(area);
+    let width = usize::from(inner.width).max(1);
+    let height = usize::from(inner.height);
+    // Wrap by hand so the newest entries stay at the bottom even when long paths wrap.
+    let mut rows: Vec<Line> = Vec::new();
+    for entry in model.log.iter().rev() {
+        if rows.len() >= height {
+            break;
+        }
+        let chars: Vec<char> = entry.chars().collect();
+        for chunk in chars.chunks(width).rev() {
+            rows.push(Line::from(chunk.iter().collect::<String>()));
+        }
+    }
+    rows.truncate(height);
+    rows.reverse();
+    frame.render_widget(Paragraph::new(rows).block(block), area);
 }
 
 fn render_help(_model: &Model, frame: &mut Frame, area: Rect) {
-    let help = " r record/stop   ↑/↓ format   m mic   s system audio   p probe providers   q quit";
+    let help =
+        " r record  ↑/↓ format  n new fmt  e edit fmt  o open note  m mic  s sys  p probe  q quit";
     frame.render_widget(
         Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
         area,
@@ -227,6 +237,18 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(90, 18)).unwrap();
         terminal.draw(|f| render(&model, f)).unwrap();
         insta::assert_snapshot!(terminal.backend().to_string());
+    }
+
+    #[test]
+    fn log_keeps_the_newest_entry_visible_when_lines_wrap() {
+        let mut model = Model::new(vec![], None);
+        for i in 0..20 {
+            model.push_log(format!("entry {i} {}", "x".repeat(60)));
+        }
+        model.push_log("newest");
+        let mut terminal = Terminal::new(TestBackend::new(60, 14)).unwrap();
+        terminal.draw(|f| render(&model, f)).unwrap();
+        assert!(terminal.backend().to_string().contains("newest"));
     }
 
     #[test]

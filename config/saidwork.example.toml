@@ -10,7 +10,7 @@ system_audio = "default"
 transcriber = "pianissimo"
 rewriter = "gemma-local"
 # Format pre-selected in the UI and used by `saidwork record` when --format is not given.
-default_format = "meeting-notes"
+default_format = "conversation"
 # Optional ISO-639-1 language hint for the transcriber ("en", "sv", ...). Pianissimo is Swedish-only.
 language = "sv"
 

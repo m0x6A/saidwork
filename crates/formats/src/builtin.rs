@@ -4,6 +4,10 @@
 /// so users can edit or delete them freely afterwards.
 pub const BUILTIN_FORMATS: &[(&str, &str)] = &[
     (
+        "conversation.md",
+        include_str!("../../../formats/conversation.md"),
+    ),
+    (
         "meeting-notes.md",
         include_str!("../../../formats/meeting-notes.md"),
     ),
@@ -16,6 +20,9 @@ pub const BUILTIN_FORMATS: &[(&str, &str)] = &[
         include_str!("../../../formats/task-list.md"),
     ),
 ];
+
+/// Starting point for a format the user defines in their editor.
+pub const NEW_FORMAT_TEMPLATE: &str = include_str!("new_format.md");
 
 #[cfg(test)]
 mod tests {
@@ -32,5 +39,11 @@ mod tests {
                 "{file} should document when to use it"
             );
         }
+    }
+
+    #[test]
+    fn new_format_template_parses() {
+        let f = parse_format(FormatId::new("x").unwrap(), NEW_FORMAT_TEMPLATE).unwrap();
+        assert_eq!(f.name, "My format");
     }
 }

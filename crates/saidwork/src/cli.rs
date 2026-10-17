@@ -6,8 +6,8 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 use saidwork_app::{
-    App, Config, DeviceSelection, EXAMPLE_CONFIG, FormatId, FormatRepository, ProviderName,
-    ProviderStatus, SessionEvent, SourceKind, default_backend,
+    App, Config, DeviceSelection, DraftOutcome, EXAMPLE_CONFIG, FormatDraft, FormatId,
+    FormatRepository, ProviderName, ProviderStatus, SessionEvent, SourceKind, default_backend,
 };
 use saidwork_capture::{AudioBackend, FakeBackend};
 use saidwork_kernel::AppPaths;
@@ -40,6 +40,9 @@ enum Command {
         /// Play this WAV file instead of capturing devices; stops automatically at the end.
         #[arg(long, value_name = "FILE")]
         fake_audio: Option<PathBuf>,
+        /// Open the finished note in your editor ($VISUAL, $EDITOR, else nvim).
+        #[arg(long)]
+        review: bool,
     },
     /// Transcribe a WAV file and print the text.
     Transcribe { file: PathBuf },
@@ -50,6 +53,9 @@ enum Command {
         format: Option<String>,
         #[arg(long)]
         context: Option<String>,
+        /// Open the finished note in your editor ($VISUAL, $EDITOR, else nvim).
+        #[arg(long)]
+        review: bool,
     },
     /// List capturable audio devices.
     Devices,
@@ -76,6 +82,12 @@ enum FormatsCommand {
     List,
     /// Print the directory formats are read from.
     Dir,
+    /// Define a new format in your editor; its id is derived from the `name` you give it.
+    New,
+    /// Edit a format in your editor; it is only saved if it still parses.
+    Edit { id: String },
+    /// Restore a built-in format to the shipped version, discarding your changes.
+    Reset { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -121,13 +133,15 @@ pub async fn run() -> anyhow::Result<()> {
         } => config_init(&ctx.config_path, &ctx.paths, force),
         Command::Devices => devices(),
         Command::Tui => {
-            let app = ctx.app(default_backend()?)?;
+            // The TUI shows the format warnings in its log; stderr would be painted over.
+            let app = load_app(&ctx.config_path, &ctx.paths, default_backend()?)?;
             Ok(saidwork_tui::run(app).await?)
         }
         Command::Record {
             format,
             context,
             fake_audio,
+            review,
         } => {
             let (backend, fake): (Arc<dyn AudioBackend>, bool) = match &fake_audio {
                 Some(file) => (
@@ -140,7 +154,8 @@ pub async fn run() -> anyhow::Result<()> {
                 None => (default_backend()?, false),
             };
             let app = ctx.app(backend)?;
-            with_shutdown(&app, record(&app, format, context, fake)).await
+            let note = with_shutdown(&app, record(&app, format, context, fake)).await?;
+            review_note(review, &note).await
         }
         Command::Transcribe { file } => {
             let app = ctx.headless_app()?;
@@ -150,11 +165,20 @@ pub async fn run() -> anyhow::Result<()> {
             file,
             format,
             context,
+            review,
         } => {
             let app = ctx.headless_app()?;
-            with_shutdown(&app, rewrite(&app, &file, format, context)).await
+            let note = with_shutdown(&app, rewrite(&app, &file, format, context)).await?;
+            review_note(review, &note).await
         }
-        Command::Formats { command } => formats(&ctx.headless_app()?, &command),
+        // `reset` is the fix for the customised-format warning, so do not print it first.
+        Command::Formats {
+            command: command @ FormatsCommand::Reset { .. },
+        } => {
+            let app = load_app(&ctx.config_path, &ctx.paths, Arc::new(FakeBackend::new()))?;
+            formats(&app, &command).await
+        }
+        Command::Formats { command } => formats(&ctx.headless_app()?, &command).await,
         Command::Providers {
             command: ProvidersCommand::Status,
         } => providers_status(&ctx.headless_app()?).await,
@@ -175,7 +199,11 @@ struct Context_ {
 
 impl Context_ {
     fn app(&self, backend: Arc<dyn AudioBackend>) -> anyhow::Result<App> {
-        load_app(&self.config_path, &self.paths, backend)
+        let app = load_app(&self.config_path, &self.paths, backend)?;
+        for warning in app.format_warnings() {
+            eprintln!("warning: {warning}");
+        }
+        Ok(app)
     }
 
     /// An app that never touches audio hardware.
@@ -185,10 +213,10 @@ impl Context_ {
 }
 
 /// Run `work`, then stop any providers the app launched, whatever the outcome.
-async fn with_shutdown(
+async fn with_shutdown<T>(
     app: &App,
-    work: impl Future<Output = anyhow::Result<()>>,
-) -> anyhow::Result<()> {
+    work: impl Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<T> {
     let result = work.await;
     app.shutdown().await;
     result
@@ -223,7 +251,7 @@ async fn rewrite(
     file: &Path,
     format: Option<String>,
     context: Option<String>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<PathBuf> {
     let format = pick_format(app, format)?;
     app.pipeline
         .prepare_providers(Some(&stderr_events()))
@@ -235,11 +263,24 @@ async fn rewrite(
         .rewrite_and_save(&text, &format, context, Some(&stderr_events()))
         .await?;
     print_outcome(&path, &note.markdown);
-    Ok(())
+    Ok(path)
 }
 
-fn formats(app: &App, command: &FormatsCommand) -> anyhow::Result<()> {
+async fn formats(app: &App, command: &FormatsCommand) -> anyhow::Result<()> {
     match command {
+        FormatsCommand::New => edit_format(app, app.drafts.begin_new()?).await?,
+        FormatsCommand::Edit { id } => {
+            let id = FormatId::new(id)?;
+            edit_format(app, app.drafts.begin_edit(&id)?).await?;
+        }
+        FormatsCommand::Reset { id } => {
+            let format = app.formats.restore_builtin(&FormatId::new(id)?)?;
+            println!(
+                "restored built-in format {} ({})",
+                format.id,
+                app.formats.path_of(&format.id).display()
+            );
+        }
         FormatsCommand::Dir => println!("{}", app.formats.dir().display()),
         FormatsCommand::List => {
             let default = app.config.pipeline.default_format.as_deref();
@@ -254,6 +295,63 @@ fn formats(app: &App, command: &FormatsCommand) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Open `draft` in the editor until it is saved, left unchanged, or the user gives up.
+async fn edit_format(app: &App, draft: FormatDraft) -> anyhow::Result<()> {
+    loop {
+        open_editor(&draft.path).await?;
+        match app.drafts.finish(&draft) {
+            Ok(DraftOutcome::Saved(f)) => {
+                println!(
+                    "saved format {} ({})",
+                    f.id,
+                    app.formats.path_of(&f.id).display()
+                );
+                return Ok(());
+            }
+            Ok(DraftOutcome::Unchanged) => {
+                println!("unchanged; nothing saved");
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!("error: {err}");
+                if !confirm("reopen the editor to fix it? [Y/n] ")? {
+                    println!("draft kept at {}", draft.path.display());
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+async fn review_note(review: bool, note: &Path) -> anyhow::Result<()> {
+    if review {
+        open_editor(note).await?;
+    }
+    Ok(())
+}
+
+async fn open_editor(path: &Path) -> anyhow::Result<()> {
+    let editor = saidwork_kernel::resolve_editor();
+    let status = saidwork_kernel::open_in_editor(path)
+        .await
+        .with_context(|| format!("starting editor `{editor}`"))?;
+    if !status.success() {
+        bail!("editor `{editor}` exited with {status}");
+    }
+    Ok(())
+}
+
+/// Ask a yes/no question on stderr; Enter means yes, end of input means no.
+fn confirm(question: &str) -> anyhow::Result<bool> {
+    eprint!("{question}");
+    std::io::stderr().flush()?;
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer)? == 0 {
+        return Ok(false);
+    }
+    Ok(!answer.trim().eq_ignore_ascii_case("n"))
 }
 
 async fn providers_status(app: &App) -> anyhow::Result<()> {
@@ -309,10 +407,11 @@ fn config_init(config_path: &Path, paths: &AppPaths, force: bool) -> anyhow::Res
     std::fs::write(config_path, EXAMPLE_CONFIG)?;
     println!("wrote {}", config_path.display());
     let formats = saidwork_formats::FsFormatRepository::new(paths.formats_dir());
-    let written = formats.ensure_initialised()?;
+    let sync = formats.ensure_initialised()?;
     println!(
-        "formats directory: {} ({written} built-in templates written)",
-        formats.dir().display()
+        "formats directory: {} ({} built-in templates written)",
+        formats.dir().display(),
+        sync.written.len()
     );
     println!("edit the providers section, then run `saidwork providers status`");
     Ok(())
@@ -349,7 +448,7 @@ async fn record(
     format: Option<String>,
     context: Option<String>,
     fake: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<PathBuf> {
     let format = pick_format(app, format)?;
     let events = stderr_events();
     app.pipeline.prepare_providers(Some(&events)).await?;
@@ -404,5 +503,5 @@ async fn record(
         .process(&recording, &format, context, Some(&events))
         .await?;
     print_outcome(&outcome.note_path, &outcome.markdown);
-    Ok(())
+    Ok(outcome.note_path)
 }

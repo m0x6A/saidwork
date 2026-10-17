@@ -40,7 +40,7 @@ Edit the providers in `saidwork.toml` (see `config/saidwork.example.toml`), then
 saidwork providers status        # probe endpoints
 saidwork devices                 # list microphones and system-audio monitors
 saidwork formats list            # the Markdown formats in ~/.config/saidwork/formats
-saidwork                         # start the TUI: r record/stop, ↑/↓ format, m/s devices, q quit
+saidwork                         # start the TUI: r record/stop, ↑/↓ format, n/e/o editor, q quit
 ```
 
 Logs go to `~/.local/share/saidwork/saidwork.log` (`RUST_LOG=debug` for more). Set
@@ -82,6 +82,32 @@ when_to_use: Several people discussing topics, decisions and work items.
 The body is handed to the rewriting model as the template to follow; `{{date}}` and
 `{{title}}` are filled in. `when_to_use` is reserved for a future selector that lets the
 LLM pick the format from the transcript.
+
+The built-in formats (`conversation`, the default, plus `meeting-notes`, `journal-entry`
+and `task-list`) are written to the formats directory at startup if they have never been installed there,
+so new built-ins arrive with upgrades. Installed ones are tracked in
+`.installed-builtins` in that directory, so a built-in you delete stays deleted. One you
+have edited is never overwritten; saidwork warns that it differs from the shipped
+version, and `saidwork formats reset <id>` puts the shipped version back (or brings back
+a deleted one).
+
+### Editing in your editor
+
+Formats and notes open in `$VISUAL`, else `$EDITOR`, else `nvim`:
+
+```sh
+saidwork formats new             # start from a skeleton; the id comes from `name`
+saidwork formats edit task-list  # edit an existing format
+saidwork formats reset task-list # restore a built-in to the shipped version
+saidwork record --review         # open the finished note when it is saved (also `rewrite`)
+```
+
+In the TUI, `n` defines a new format, `e` edits the selected one and `o` opens the note
+that was just saved; the interface comes back when you quit the editor.
+
+Formats are edited as drafts under the data directory and only saved when they still
+parse, so a mistake never breaks the format list. A rejected draft is kept and reopened
+the next time, and saving a draft unchanged does nothing.
 
 ## Architecture
 

@@ -4,9 +4,11 @@
 //! that carry no business rules of their own. Each slice owns its domain model.
 
 mod clock;
+mod editor;
 mod paths;
 
 pub use clock::{Clock, FixedClock, SystemClock};
+pub use editor::{FALLBACK_EDITOR, open_in_editor, resolve_editor};
 pub use paths::{AppPaths, PathsError, expand_tilde};
 pub use secrecy::{ExposeSecret, SecretString};
 pub mod retry;

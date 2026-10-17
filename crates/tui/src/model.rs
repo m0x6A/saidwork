@@ -65,6 +65,21 @@ pub enum Msg {
     RecordingStarted(Result<(), String>),
     Session(SessionEvent),
     Finished(Result<SessionOutcome, String>),
+    /// A format was saved from the editor; `formats` is the reloaded list.
+    FormatSaved {
+        formats: Vec<Format>,
+        id: FormatId,
+    },
+    /// The editor closed; the line describes what came of it.
+    Edited(String),
+}
+
+/// What to open in the user's editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditTarget {
+    NewFormat,
+    Format(FormatId),
+    Note(PathBuf),
 }
 
 /// Side effects the runtime performs on behalf of the reducer.
@@ -78,6 +93,8 @@ pub enum Cmd {
     StopAndProcess(FormatId),
     /// Stop the recorder and throw the audio away.
     Discard,
+    /// Suspend the interface and open the editor.
+    Edit(EditTarget),
 }
 
 const LOG_LINES: usize = 200;
@@ -205,6 +222,21 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.phase = Phase::Failed { message: err };
             vec![]
         }
+        Msg::FormatSaved { formats, id } => {
+            model.push_log(format!("saved format {id}"));
+            model.formats = formats;
+            if let Some(i) = model.formats.iter().position(|f| f.id == id) {
+                model.selected_format = i;
+            }
+            model.selected_format = model
+                .selected_format
+                .min(model.formats.len().saturating_sub(1));
+            vec![]
+        }
+        Msg::Edited(line) => {
+            model.push_log(line);
+            vec![]
+        }
     }
 }
 
@@ -235,6 +267,23 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
             vec![]
         }
         KeyCode::Char('p') => vec![Cmd::ProbeProviders],
+        KeyCode::Char('n') => vec![Cmd::Edit(EditTarget::NewFormat)],
+        KeyCode::Char('e') => {
+            if let Some(f) = model.selected_format() {
+                vec![Cmd::Edit(EditTarget::Format(f.id.clone()))]
+            } else {
+                model.push_log("no format selected");
+                vec![]
+            }
+        }
+        KeyCode::Char('o') => {
+            if let Phase::Done { note_path } = &model.phase {
+                vec![Cmd::Edit(EditTarget::Note(note_path.clone()))]
+            } else {
+                model.push_log("no note to open yet; record one first");
+                vec![]
+            }
+        }
         _ => vec![],
     }
 }
@@ -454,6 +503,42 @@ mod tests {
             vec![]
         );
         assert!(idle.should_quit);
+    }
+
+    #[test]
+    fn editor_keys() {
+        let mut m = ready_model();
+        assert_eq!(
+            update(&mut m, key(KeyCode::Char('n'))),
+            vec![Cmd::Edit(EditTarget::NewFormat)]
+        );
+        assert_eq!(
+            update(&mut m, key(KeyCode::Char('e'))),
+            vec![Cmd::Edit(EditTarget::Format(FormatId::new("b").unwrap()))]
+        );
+        assert_eq!(update(&mut m, key(KeyCode::Char('o'))), vec![]);
+        assert!(m.log.last().unwrap().contains("no note"));
+        m.phase = Phase::Done {
+            note_path: PathBuf::from("/n/x.md"),
+        };
+        assert_eq!(
+            update(&mut m, key(KeyCode::Char('o'))),
+            vec![Cmd::Edit(EditTarget::Note(PathBuf::from("/n/x.md")))]
+        );
+    }
+
+    #[test]
+    fn saved_format_is_selected() {
+        let mut m = ready_model();
+        update(
+            &mut m,
+            Msg::FormatSaved {
+                formats: vec![format("a"), format("aa"), format("b")],
+                id: FormatId::new("aa").unwrap(),
+            },
+        );
+        assert_eq!(m.formats.len(), 3);
+        assert_eq!(m.selected_format, 1);
     }
 
     #[test]

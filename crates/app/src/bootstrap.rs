@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use saidwork_capture::AudioBackend;
-use saidwork_formats::{FormatError, FsFormatRepository};
+use saidwork_formats::{BuiltinSync, FormatError, FsFormatRepository};
 use saidwork_kernel::{AppPaths, SystemClock};
 use saidwork_notes::FsNoteStore;
 use saidwork_providers::{
@@ -11,6 +11,7 @@ use saidwork_providers::{
 use crate::capture_service::CaptureService;
 use crate::config::Config;
 use crate::factory::{build_rewriter, build_transcriber};
+use crate::format_drafts::FormatDrafts;
 use crate::pipeline::Pipeline;
 
 /// Errors while assembling the application.
@@ -32,6 +33,9 @@ pub struct App {
     pub pipeline: Arc<Pipeline>,
     pub capture: CaptureService,
     pub formats: Arc<FsFormatRepository>,
+    pub drafts: FormatDrafts,
+    /// What startup did with the built-in formats.
+    pub builtin_formats: BuiltinSync,
 }
 
 impl App {
@@ -91,7 +95,10 @@ impl App {
         let rewriter = build_rewriter(supervisor.get(&rewriter_name)?);
 
         let formats = Arc::new(FsFormatRepository::new(config.formats_dir(&paths)));
-        formats.ensure_initialised()?;
+        let builtin_formats = formats.ensure_initialised()?;
+        for path in &builtin_formats.written {
+            tracing::info!(path = %path.display(), "installed built-in format");
+        }
 
         let pipeline = Arc::new(Pipeline {
             supervisor,
@@ -106,13 +113,33 @@ impl App {
             language: config.pipeline.language.clone(),
         });
 
+        let drafts = FormatDrafts::new(formats.clone(), paths.drafts_dir());
         Ok(Self {
             config,
             paths,
             pipeline,
             capture: CaptureService::new(backend),
+            drafts,
             formats,
+            builtin_formats,
         })
+    }
+
+    /// One warning per built-in format the user has changed, so they know it no longer
+    /// matches the shipped version.
+    #[must_use]
+    pub fn format_warnings(&self) -> Vec<String> {
+        self.builtin_formats
+            .customised
+            .iter()
+            .map(|path| {
+                let id = path.file_stem().unwrap_or_default().to_string_lossy();
+                format!(
+                    "{} differs from the built-in format; `saidwork formats reset {id}` restores it",
+                    path.display()
+                )
+            })
+            .collect()
     }
 
     /// Stop any providers this process launched.
@@ -151,7 +178,7 @@ mod tests {
         let app = App::build(config, paths.clone(), Arc::new(FakeBackend::new())).unwrap();
         assert_eq!(
             app.formats.list().unwrap().len(),
-            3,
+            saidwork_formats::BUILTIN_FORMATS.len(),
             "built-in formats materialised"
         );
         assert!(paths.formats_dir().join("meeting-notes.md").exists());

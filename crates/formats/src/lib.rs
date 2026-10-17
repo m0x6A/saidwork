@@ -11,8 +11,8 @@ mod domain;
 mod ports;
 mod selector;
 
-pub use adapters::FsFormatRepository;
-pub use builtin::BUILTIN_FORMATS;
+pub use adapters::{BuiltinSync, FsFormatRepository};
+pub use builtin::{BUILTIN_FORMATS, NEW_FORMAT_TEMPLATE};
 pub use domain::{Format, FormatError, FormatId, parse_format};
 pub use ports::{FormatRepository, FormatSelector, SelectionError};
 pub use selector::ManualSelector;
