@@ -74,7 +74,11 @@ pub fn check_audio(backend: &dyn AudioBackend, distro: Distro) -> Check {
             CheckStatus::Warn,
             "sound server answers but lists no devices",
         )
-        .with_fix("connect a microphone, or check `pactl list sources short`"),
+        .with_fix(if distro == Distro::Windows {
+            "connect a microphone, or check Settings › System › Sound"
+        } else {
+            "connect a microphone, or check `pactl list sources short`"
+        }),
         Ok(devices) => Check::new(
             "audio",
             CheckStatus::Ok,

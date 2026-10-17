@@ -286,7 +286,11 @@ async fn doctor(ctx: &Context_) -> anyhow::Result<()> {
             Err(err) => {
                 let fix = match &err {
                     BootstrapError::Provider(ProviderError::MissingApiKeyEnv { var, .. }) => {
-                        format!("`export {var}=<your key>` before starting saidwork")
+                        if cfg!(windows) {
+                            format!("`$env:{var} = \"<your key>\"` before starting saidwork")
+                        } else {
+                            format!("`export {var}=<your key>` before starting saidwork")
+                        }
                     }
                     _ => format!("edit {}", ctx.config_path.display()),
                 };

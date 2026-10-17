@@ -4,7 +4,11 @@ use std::path::Path;
 use std::process::ExitStatus;
 
 /// Editor used when neither `$VISUAL` nor `$EDITOR` is set.
+#[cfg(not(windows))]
 pub const FALLBACK_EDITOR: &str = "nvim";
+/// Editor used when neither `%VISUAL%` nor `%EDITOR%` is set.
+#[cfg(windows)]
+pub const FALLBACK_EDITOR: &str = "notepad";
 
 /// The user's editor command: `$VISUAL`, then `$EDITOR`, then [`FALLBACK_EDITOR`].
 #[must_use]
@@ -23,18 +27,29 @@ fn pick_editor(lookup: impl Fn(&str) -> Option<String>) -> String {
 
 /// Open `path` in the user's editor and wait for it to exit.
 ///
-/// The editor command goes through `sh` like git does, so values with arguments such as
-/// `code --wait` work. The child inherits the terminal; callers owning the screen (the TUI)
-/// must release it first.
+/// The editor command goes through the shell (`sh`, or `cmd` on Windows) like git does, so
+/// values with arguments such as `code --wait` work. The child inherits the terminal;
+/// callers owning the screen (the TUI) must release it first.
 pub async fn open_in_editor(path: &Path) -> std::io::Result<ExitStatus> {
-    let editor = resolve_editor();
-    tokio::process::Command::new("sh")
-        .arg("-c")
+    editor_command(&resolve_editor(), path).status().await
+}
+
+#[cfg(not(windows))]
+fn editor_command(editor: &str, path: &Path) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.arg("-c")
         .arg(format!("{editor} \"$1\""))
         .arg("sh")
-        .arg(path)
-        .status()
-        .await
+        .arg(path);
+    cmd
+}
+
+#[cfg(windows)]
+fn editor_command(editor: &str, path: &Path) -> tokio::process::Command {
+    // `/S` makes cmd strip only the outer quotes, so the quoted path survives intact.
+    let mut cmd = tokio::process::Command::new("cmd");
+    cmd.raw_arg(format!("/S /C \"{editor} \"{}\"\"", path.display()));
+    cmd
 }
 
 #[cfg(test)]

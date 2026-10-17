@@ -106,7 +106,8 @@ impl AppPaths {
 /// 2. the user data directory (`~/.local/share/saidwork`, where `install.sh` puts them)
 /// 3. `<exe>/../share/saidwork`, which covers `/usr`, `/usr/local`, `~/.local`, any
 ///    `PREFIX` and an unpacked release tarball
-/// 4. `saidwork` under each of `$XDG_DATA_DIRS` (default `/usr/local/share:/usr/share`)
+/// 4. `saidwork` under each of `$XDG_DATA_DIRS` (default `/usr/local/share:/usr/share`;
+///    Unix only)
 /// 5. the source checkout's `tools/`, so `cargo run` and `cargo install --path` work
 fn resource_dirs(data_dir: Option<&Path>) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("SAIDWORK_SHARE_DIR")
@@ -121,15 +122,17 @@ fn resource_dirs(data_dir: Option<&Path>) -> Vec<PathBuf> {
     {
         dirs.push(prefix.join("share").join("saidwork"));
     }
-    let xdg = std::env::var("XDG_DATA_DIRS")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "/usr/local/share:/usr/share".to_owned());
-    dirs.extend(
-        xdg.split(':')
-            .filter(|d| !d.is_empty())
-            .map(|d| Path::new(d).join("saidwork")),
-    );
+    if cfg!(unix) {
+        let xdg = std::env::var("XDG_DATA_DIRS")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "/usr/local/share:/usr/share".to_owned());
+        dirs.extend(
+            xdg.split(':')
+                .filter(|d| !d.is_empty())
+                .map(|d| Path::new(d).join("saidwork")),
+        );
+    }
     // crates/kernel -> repository root; only where that checkout exists, so release
     // binaries built elsewhere do not list a path from the build machine.
     if let Some(root) = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2) {

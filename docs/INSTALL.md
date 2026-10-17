@@ -12,14 +12,16 @@ configuration, installing what that configuration needs, and checking the result
 - [4. Check everything with `saidwork doctor`](#4-check-everything-with-saidwork-doctor)
 - [Where things live](#where-things-live)
 - [Launch blocks](#launch-blocks)
+- [Windows](#windows)
 - [Troubleshooting](#troubleshooting)
 - [Uninstalling](#uninstalling)
 
 ## 1. Install saidwork
 
-saidwork runs on x86_64 Linux. It records through libpulse, so it needs a sound server:
-PipeWire with its PulseAudio layer (the default on current Fedora, Ubuntu and most
-desktops) or PulseAudio itself.
+saidwork runs on x86_64 Linux and Windows. On Linux it records through libpulse, so it
+needs a sound server: PipeWire with its PulseAudio layer (the default on current
+Fedora, Ubuntu and most desktops) or PulseAudio itself. On Windows it uses WASAPI; see
+[Windows](#windows).
 
 Download the file for your system from the
 [releases page](https://github.com/m0x6A/saidwork/releases). The packages declare
@@ -210,6 +212,56 @@ In `command`, `args` and `requires`, `~` expands to your home directory and
 `{share}/<file>` to a shipped file. If you already start a server some other way (a
 systemd unit, a wrapper script), either point `command` at your script or remove the
 launch block and saidwork will only connect to it.
+
+## Windows
+
+Download `saidwork-v*-x86_64-windows.zip` from the
+[releases page](https://github.com/m0x6A/saidwork/releases), unpack it, and run the
+installer from the unpacked folder in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+It copies `saidwork.exe` and the shipped files to `%LOCALAPPDATA%\Programs\saidwork`
+(`-Prefix D:\somewhere` changes that) and adds its `bin` folder to your user `PATH`.
+No administrator rights are needed. Open a new terminal afterwards. You can also run
+`bin\saidwork.exe` straight from the unpacked folder. Windows Terminal renders the TUI
+best.
+
+**Audio.** Microphones are WASAPI capture devices. System audio is recorded by opening
+a playback device in loopback mode, so `saidwork devices` lists each speaker or
+headset as `<name> (loopback)`. If no microphone shows up, turn on
+Settings › Privacy & security › Microphone › "Let desktop apps access your microphone".
+
+**Dependencies.** The presets work the same way as on Linux. Install the programs with
+winget:
+
+```powershell
+winget install astral-sh.uv        # local preset: runs the Pianissimo server
+winget install ggml.llamacpp       # local preset: llama-server
+winget install Ollama.Ollama       # whisper-ollama preset
+```
+
+For whisper.cpp, download `whisper-bin-x64.zip` from its
+[releases](https://github.com/ggml-org/whisper.cpp/releases), put the folder with
+`whisper-server.exe` on your `PATH`, and change the model path in the configuration to
+where you saved the model. For the `openai` preset, set the key with
+`setx OPENAI_API_KEY sk-...` and open a new terminal.
+
+**Locations.**
+
+| What | Default |
+|---|---|
+| Configuration and formats | `%APPDATA%\xdr\saidwork\config\` |
+| Recordings, transcripts, drafts, logs | `%APPDATA%\xdr\saidwork\data\` |
+| Notes | `Documents\saidwork\` |
+
+**Editor.** Formats and notes open in `%VISUAL%` or `%EDITOR%`, else Notepad. For VS Code,
+use `setx EDITOR "code --wait"`.
+
+Uninstall by deleting `%LOCALAPPDATA%\Programs\saidwork` and removing its `bin` folder
+from your user `PATH`.
 
 ## Troubleshooting
 

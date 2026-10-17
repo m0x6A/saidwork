@@ -26,16 +26,57 @@ jobs:
       - name: Package
         run: |
           name=saidwork-${GITHUB_REF_NAME}-x86_64-linux
-          mkdir -p "$name/bin" "$name/share/saidwork"
+          mkdir -p "$name/bin" "$name/share/saidwork" dist
           cp target/release/saidwork "$name/bin/"
           cp -r tools/pianissimo-server "$name/share/saidwork/"
           cp packaging/install.sh README.md docs/INSTALL.md LICENSE-MIT LICENSE-APACHE "$name"/
           cp -r config "$name/examples"
-          tar czf "$name.tar.gz" "$name"
-          cargo deb -p saidwork --no-build --output .
-          cargo generate-rpm -p crates/saidwork --output .
-          sha256sum "$name.tar.gz" *.deb *.rpm > SHA256SUMS
+          tar czf "dist/$name.tar.gz" "$name"
+          cargo deb -p saidwork --no-build --output dist
+          cargo generate-rpm -p crates/saidwork --output dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  windows:
+    runs-on: windows-latest
+    env:
+      # Link the C runtime statically so users need no Visual C++ redistributable.
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p saidwork
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "saidwork-$env:GITHUB_REF_NAME-x86_64-windows"
+          New-Item -ItemType Directory -Force "$name\bin", "$name\share\saidwork", dist | Out-Null
+          Copy-Item target\release\saidwork.exe "$name\bin\"
+          Copy-Item -Recurse tools\pianissimo-server "$name\share\saidwork\"
+          Copy-Item packaging\install.ps1, README.md, docs\INSTALL.md, LICENSE-MIT, LICENSE-APACHE $name
+          Copy-Item -Recurse config "$name\examples"
+          Compress-Archive -Path $name -DestinationPath "dist\$name.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" saidwork-*.tar.gz *.deb *.rpm SHA256SUMS --generate-notes --verify-tag
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" * --generate-notes --verify-tag

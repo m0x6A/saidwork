@@ -18,6 +18,9 @@ tracing.workspace = true
 libpulse-binding.workspace = true
 libpulse-simple-binding.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+cpal.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true

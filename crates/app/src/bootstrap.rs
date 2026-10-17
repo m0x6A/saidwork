@@ -187,7 +187,11 @@ pub fn default_backend() -> Result<Arc<dyn AudioBackend>, BootstrapError> {
     {
         Ok(Arc::new(saidwork_capture::PulseBackend::new()))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        Ok(Arc::new(saidwork_capture::WasapiBackend::new()))
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         Err(BootstrapError::NoAudioBackend)
     }

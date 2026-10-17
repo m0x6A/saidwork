@@ -28,12 +28,13 @@ spawns it when it is not answering, waits for the health check, and stops it on 
 ## Install
 
 Each [GitHub release](https://github.com/m0x6A/saidwork/releases) ships x86_64 Linux
-packages that pull in the one runtime library, libpulse, for you:
+packages that pull in the one runtime library, libpulse, for you, and a Windows zip:
 
 ```sh
 sudo dnf install ./saidwork-*.x86_64.rpm      # Fedora, RHEL, openSUSE (zypper install)
 sudo apt install ./saidwork_*_amd64.deb       # Debian, Ubuntu
 ./install.sh                                  # from the tarball, any other distro
+.\install.ps1                                 # from the Windows zip, in PowerShell
 ```
 
 Then pick a configuration and let saidwork tell you what else to install:
@@ -136,7 +137,7 @@ crates/formats        Format templates: parsing, filesystem repository, selector
 crates/providers      Provider registry, API keys, health probe, on-demand launcher
 crates/transcription  Transcriber port + OpenAI-compatible adapter
 crates/rewriting      Rewriter port, prompt builder, OpenAI-chat and Ollama adapters
-crates/capture        AudioBackend port, mixer, WAV, Pulse (Linux) and fake backends
+crates/capture        AudioBackend port, mixer, WAV, Pulse (Linux), WASAPI (Windows), fake
 crates/notes          NoteStore port + filesystem adapter
 crates/app            Config, bootstrap, the record→transcribe→rewrite→save pipeline
 crates/tui            ratatui UI (Elm-style model / update / view)
@@ -144,8 +145,8 @@ crates/saidwork       clap binary: TUI by default, headless subcommands
 ```
 
 Slices never depend on each other; `app` maps between their models. Other platforms
-compile without a native audio backend today; adding one means implementing
-`AudioBackend` (e.g. with cpal) in `crates/capture/src/adapters`.
+(macOS) compile without a native audio backend today; adding one means implementing
+`AudioBackend` (the Windows one uses cpal) in `crates/capture/src/adapters`.
 
 ## Development
 
@@ -157,10 +158,11 @@ cargo test -p saidwork-capture -- --ignored    # hardware smoke test against the
 Tests use fakes for audio, transcription and rewriting, `wiremock` for the HTTP
 adapters, `insta` snapshots for prompts and screens, and `proptest` for the mixer.
 
-CI (`.github/workflows/ci.yml`) runs the same checks plus an MSRV build on every push and
-pull request. Pushing a `v*` tag builds the x86_64 Linux tarball, `.deb` and `.rpm`
-(`packaging/install.sh`, `[package.metadata.deb]` and `[package.metadata.generate-rpm]` in
-`crates/saidwork/Cargo.toml`) and attaches them to a GitHub release:
+CI (`.github/workflows/ci.yml`) runs the same checks on Linux and Windows plus an MSRV
+build on every push and pull request. Pushing a `v*` tag builds the x86_64 Linux
+tarball, `.deb` and `.rpm` (`packaging/install.sh`, `[package.metadata.deb]` and
+`[package.metadata.generate-rpm]` in `crates/saidwork/Cargo.toml`) and the Windows zip
+(`packaging/install.ps1`), and attaches them with one `SHA256SUMS` to a GitHub release:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
