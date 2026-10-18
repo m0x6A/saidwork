@@ -1,10 +1,11 @@
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::process::{Child, Command};
 
-use crate::domain::{LaunchSpec, ProviderError};
+use crate::domain::{LaunchSpec, MissingRequirement, ProviderError};
 use crate::ports::{ManagedProcess, ProcessLauncher};
 
 /// Launcher backed by `tokio::process`.
@@ -32,8 +33,49 @@ impl TokioLauncher {
     }
 }
 
+/// Where `command` would be run from: itself if it names a path, else the first
+/// executable match on `PATH`.
+#[must_use]
+fn find_command(command: &str) -> Option<PathBuf> {
+    if command.contains('/') {
+        let path = Path::new(command);
+        return is_executable(path).then(|| path.to_path_buf());
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(command))
+        .find(|p| is_executable(p))
+}
+
+fn is_executable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.metadata()
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
+}
+
 #[async_trait]
 impl ProcessLauncher for TokioLauncher {
+    fn missing(&self, spec: &LaunchSpec) -> Vec<MissingRequirement> {
+        let command = find_command(&spec.command)
+            .is_none()
+            .then(|| MissingRequirement::Command(spec.command.clone()));
+        command
+            .into_iter()
+            .chain(
+                spec.required_files
+                    .iter()
+                    .filter(|f| !f.exists())
+                    .map(|f| MissingRequirement::File(f.clone())),
+            )
+            .collect()
+    }
+
     async fn spawn(&self, spec: &LaunchSpec) -> Result<Box<dyn ManagedProcess>, ProviderError> {
         let mut cmd = Command::new(&spec.command);
         cmd.args(&spec.args)
@@ -167,6 +209,29 @@ mod tests {
         let spec = LaunchSpec::new("definitely-not-a-real-command-xyz");
         let err = TokioLauncher::new().spawn(&spec).await.unwrap_err();
         assert!(matches!(err, ProviderError::Spawn { .. }));
+    }
+
+    #[test]
+    fn missing_reports_absent_commands_and_files() {
+        let launcher = TokioLauncher::new();
+        assert_eq!(launcher.missing(&LaunchSpec::new("sh")), []);
+        assert!(find_command("sh").is_some());
+
+        let mut spec = LaunchSpec::new("definitely-not-a-real-command-xyz");
+        spec.required_files = vec![PathBuf::from("/definitely/not/here.py")];
+        assert_eq!(
+            launcher.missing(&spec),
+            [
+                MissingRequirement::Command("definitely-not-a-real-command-xyz".into()),
+                MissingRequirement::File("/definitely/not/here.py".into()),
+            ]
+        );
+        assert_eq!(
+            launcher.missing(&LaunchSpec::new("/definitely/not/a/binary")),
+            [MissingRequirement::Command(
+                "/definitely/not/a/binary".into()
+            )]
+        );
     }
 
     #[tokio::test]

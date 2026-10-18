@@ -2118,6 +2118,7 @@ dependencies = [
  "chrono",
  "directories",
  "secrecy",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",

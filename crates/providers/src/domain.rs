@@ -56,6 +56,8 @@ pub struct LaunchSpec {
     pub stop_on_exit: bool,
     /// Where the child's stdout/stderr go; `None` discards them.
     pub log_file: Option<PathBuf>,
+    /// Files that must exist before launching, e.g. a server script passed in `args`.
+    pub required_files: Vec<PathBuf>,
 }
 
 impl LaunchSpec {
@@ -70,6 +72,26 @@ impl LaunchSpec {
             startup_timeout: Duration::from_secs(60),
             stop_on_exit: true,
             log_file: None,
+            required_files: Vec::new(),
+        }
+    }
+}
+
+/// Something a launch spec needs on this machine that is not there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MissingRequirement {
+    /// The executable is neither a path to a file nor found on `PATH`.
+    Command(String),
+    /// A file listed in [`LaunchSpec::required_files`] does not exist.
+    File(PathBuf),
+}
+
+impl fmt::Display for MissingRequirement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Command(c) if c.contains('/') => write!(f, "`{c}` does not exist"),
+            Self::Command(c) => write!(f, "`{c}` is not installed (not found on PATH)"),
+            Self::File(p) => write!(f, "`{}` does not exist", p.display()),
         }
     }
 }
@@ -145,6 +167,11 @@ pub enum ProviderError {
     },
     #[error("could not stop process: {0}")]
     Terminate(String),
+    #[error("provider `{name}` cannot be started: {missing}")]
+    Missing {
+        name: ProviderName,
+        missing: MissingRequirement,
+    },
 }
 
 #[cfg(test)]

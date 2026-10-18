@@ -1,0 +1,46 @@
+# saidwork "whisper-ollama" preset: any-language transcription with whisper.cpp and
+# rewriting with Ollama, both on this machine.
+#   saidwork config init --preset whisper-ollama
+#
+# Needs whisper-server (build whisper.cpp, see docs/INSTALL.md), a Whisper model, and
+# Ollama with the model pulled once: `ollama pull qwen3:8b`. `saidwork doctor` checks it.
+
+[capture]
+microphone = "default"
+system_audio = "default"
+
+[pipeline]
+transcriber = "whisper-local"
+rewriter = "ollama"
+default_format = "meeting-notes"
+# Leave unset to let Whisper detect the language, or give an ISO-639-1 code ("en", "sv", ...).
+# language = "en"
+
+# whisper.cpp's server; `--inference-path` makes it speak the OpenAI transcription API.
+# Download the model with whisper.cpp's models/download-ggml-model.sh large-v3-turbo
+# and move it to the path below.
+[providers.whisper-local]
+kind = "openai-compatible"
+base_url = "http://127.0.0.1:8179"
+model = "whisper-1"              # informational; the server has one model
+[providers.whisper-local.launch]
+command = "whisper-server"
+args = [
+    "--host", "127.0.0.1", "--port", "8179",
+    "--inference-path", "/v1/audio/transcriptions",
+    "-m", "~/.local/share/whisper/ggml-large-v3-turbo.bin",
+]
+requires = ["~/.local/share/whisper/ggml-large-v3-turbo.bin"]   # checked before launching
+startup_timeout_secs = 120
+stop_on_exit = true
+
+# Ollama's native API. Its service usually runs already (`systemctl enable --now ollama`);
+# otherwise saidwork starts `ollama serve` and leaves it running.
+[providers.ollama]
+kind = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "qwen3:8b"
+[providers.ollama.launch]
+command = "ollama"
+args = ["serve"]
+stop_on_exit = false

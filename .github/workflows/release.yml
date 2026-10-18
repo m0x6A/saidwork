@@ -19,16 +19,23 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpulse-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
       - run: cargo build --release --locked -p saidwork
       - name: Package
         run: |
           name=saidwork-${GITHUB_REF_NAME}-x86_64-linux
-          mkdir -p "$name"
-          cp target/release/saidwork README.md LICENSE-MIT LICENSE-APACHE "$name"/
-          cp -r config formats "$name"/
+          mkdir -p "$name/bin" "$name/share/saidwork"
+          cp target/release/saidwork "$name/bin/"
+          cp -r tools/pianissimo-server "$name/share/saidwork/"
+          cp packaging/install.sh README.md docs/INSTALL.md LICENSE-MIT LICENSE-APACHE "$name"/
+          cp -r config "$name/examples"
           tar czf "$name.tar.gz" "$name"
-          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          cargo deb -p saidwork --no-build --output .
+          cargo generate-rpm -p crates/saidwork --output .
+          sha256sum "$name.tar.gz" *.deb *.rpm > SHA256SUMS
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" saidwork-*.tar.gz* --generate-notes --verify-tag
+        run: gh release create "$GITHUB_REF_NAME" saidwork-*.tar.gz *.deb *.rpm SHA256SUMS --generate-notes --verify-tag
