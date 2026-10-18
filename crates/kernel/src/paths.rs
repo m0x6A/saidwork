@@ -185,7 +185,15 @@ mod tests {
     #[test]
     fn discover_finds_a_config_dir_named_after_the_app() {
         let paths = AppPaths::discover().expect("home dir available in tests");
-        assert!(paths.config_dir.ends_with("saidwork"));
+        // `~/.config/saidwork` on Linux, `%APPDATA%\xdr\saidwork\config` on Windows.
+        assert!(
+            paths
+                .config_dir
+                .components()
+                .any(|c| c.as_os_str() == "saidwork"),
+            "{}",
+            paths.config_dir.display()
+        );
     }
 }
 
