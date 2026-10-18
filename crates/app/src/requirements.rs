@@ -17,13 +17,19 @@ pub enum Distro {
     Arch,
     /// openSUSE and SLE (zypper).
     Suse,
+    /// Windows (winget).
+    Windows,
     Other,
 }
 
 impl Distro {
-    /// Read `/etc/os-release`; anything unreadable or unknown is [`Distro::Other`].
+    /// [`Distro::Windows`] on Windows, else read `/etc/os-release`; anything unreadable or
+    /// unknown is [`Distro::Other`].
     #[must_use]
     pub fn detect() -> Self {
+        if cfg!(windows) {
+            return Self::Windows;
+        }
         std::fs::read_to_string("/etc/os-release")
             .map_or(Self::Other, |text| Self::from_os_release(&text))
     }
@@ -99,6 +105,11 @@ pub const AUDIO_SERVER: Dependency = Dependency {
             Distro::Suse,
             "sudo zypper install pipewire-pulseaudio && systemctl --user enable --now pipewire-pulse.socket",
         ),
+        (
+            Distro::Windows,
+            "make sure the Windows Audio service is running and turn on Settings › Privacy & \
+             security › Microphone › \"Let desktop apps access your microphone\"",
+        ),
     ],
     fallback: "install and start PipeWire with its PulseAudio layer (pipewire-pulse), or PulseAudio",
     note: None,
@@ -113,6 +124,10 @@ pub const CA_CERTIFICATES: Dependency = Dependency {
         (Distro::Debian, "sudo apt install ca-certificates"),
         (Distro::Arch, "sudo pacman -S ca-certificates"),
         (Distro::Suse, "sudo zypper install ca-certificates"),
+        (
+            Distro::Windows,
+            "saidwork uses the Windows certificate store; run Windows Update to refresh it",
+        ),
     ],
     fallback: "install your distribution's ca-certificates package",
     note: None,
@@ -126,6 +141,7 @@ pub const KNOWN_COMMANDS: &[Dependency] = &[
         install: &[
             (Distro::Fedora, "sudo dnf install uv"),
             (Distro::Arch, "sudo pacman -S uv"),
+            (Distro::Windows, "winget install astral-sh.uv"),
         ],
         fallback: "curl -LsSf https://astral.sh/uv/install.sh | sh",
         note: Some("the first start downloads the Pianissimo model (about 660 MB)"),
@@ -133,12 +149,15 @@ pub const KNOWN_COMMANDS: &[Dependency] = &[
     Dependency {
         id: "llama-server",
         purpose: "serves a local GGUF model (llama.cpp) for rewriting",
-        install: &[(
-            Distro::Fedora,
-            "download a release from https://github.com/ggml-org/llama.cpp/releases and put \
-             llama-server on PATH (`sudo dnf install llama-cpp` also works, but may be too old \
-             for recent models)",
-        )],
+        install: &[
+            (
+                Distro::Fedora,
+                "download a release from https://github.com/ggml-org/llama.cpp/releases and put \
+                 llama-server on PATH (`sudo dnf install llama-cpp` also works, but may be too \
+                 old for recent models)",
+            ),
+            (Distro::Windows, "winget install ggml.llamacpp"),
+        ],
         fallback: "download a release from https://github.com/ggml-org/llama.cpp/releases (or \
                    build it) and put llama-server on PATH",
         note: Some("with `-hf`, the first start downloads the model from Hugging Face"),
@@ -146,7 +165,12 @@ pub const KNOWN_COMMANDS: &[Dependency] = &[
     Dependency {
         id: "whisper-server",
         purpose: "serves a local Whisper model (whisper.cpp) for transcription",
-        install: &[],
+        install: &[(
+            Distro::Windows,
+            "download whisper-bin-x64.zip from https://github.com/ggml-org/whisper.cpp/releases, \
+             put the folder with whisper-server.exe on PATH and download a ggml model from \
+             https://huggingface.co/ggerganov/whisper.cpp",
+        )],
         fallback: "git clone https://github.com/ggml-org/whisper.cpp && cd whisper.cpp && \
                    cmake -B build && cmake --build build -j --config Release, then put \
                    build/bin/whisper-server on PATH and download a model with \
@@ -159,6 +183,7 @@ pub const KNOWN_COMMANDS: &[Dependency] = &[
         install: &[
             (Distro::Fedora, "sudo dnf install ollama"),
             (Distro::Arch, "sudo pacman -S ollama"),
+            (Distro::Windows, "winget install Ollama.Ollama"),
         ],
         fallback: "curl -fsSL https://ollama.com/install.sh | sh",
         note: Some("pull the model once with `ollama pull <model>`"),
@@ -166,10 +191,11 @@ pub const KNOWN_COMMANDS: &[Dependency] = &[
 ];
 
 /// The catalogue entry for a launch command, matched on its file name so
-/// `~/bin/llama-server` finds the `llama-server` entry.
+/// `~/bin/llama-server` and `llama-server.exe` find the `llama-server` entry.
 #[must_use]
 pub fn known_command(command: &str) -> Option<&'static Dependency> {
     let file_name = Path::new(command).file_name()?.to_str()?;
+    let file_name = file_name.strip_suffix(".exe").unwrap_or(file_name);
     KNOWN_COMMANDS.iter().find(|d| d.id == file_name)
 }
 
@@ -208,6 +234,11 @@ mod tests {
         assert_eq!(uv.install_steps(Distro::Fedora), "sudo dnf install uv");
         assert!(uv.install_steps(Distro::Debian).contains("astral.sh"));
         assert!(known_command("llama-server").is_some());
+        assert!(known_command("llama-server.exe").is_some());
+        assert_eq!(
+            uv.install_steps(Distro::Windows),
+            "winget install astral-sh.uv"
+        );
         assert!(known_command("my-own-wrapper.sh").is_none());
     }
 }

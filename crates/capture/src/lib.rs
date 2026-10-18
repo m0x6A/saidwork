@@ -3,7 +3,8 @@
 //!
 //! The Linux adapter speaks the PulseAudio protocol, which PipeWire serves
 //! natively, so microphones and sink monitors (system audio) are both plain
-//! sources. Other platforms currently only have the [`FakeBackend`].
+//! sources. The Windows adapter uses WASAPI, recording render endpoints in
+//! loopback mode for system audio. Other platforms only have the [`FakeBackend`].
 
 mod adapters;
 mod domain;
@@ -14,6 +15,8 @@ mod recorder;
 pub use adapters::FakeBackend;
 #[cfg(target_os = "linux")]
 pub use adapters::PulseBackend;
+#[cfg(windows)]
+pub use adapters::WasapiBackend;
 pub use domain::{
     AudioDevice, AudioSpec, CaptureError, Recording, RecordingId, SourceKind, resample,
 };

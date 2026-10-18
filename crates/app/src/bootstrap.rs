@@ -30,8 +30,10 @@ fn resolve_launch_word(word: &str, paths: &AppPaths, required: &mut Vec<PathBuf>
     else {
         return expand_tilde(Path::new(word)).display().to_string();
     };
+    // Configs always use `/`; rebuild it with the platform's separator.
+    let relative: PathBuf = relative.split('/').collect();
     let path = paths
-        .find_resource(Path::new(relative))
+        .find_resource(&relative)
         .unwrap_or_else(|| PathBuf::from(word));
     let resolved = path.display().to_string();
     required.push(path);
@@ -187,7 +189,11 @@ pub fn default_backend() -> Result<Arc<dyn AudioBackend>, BootstrapError> {
     {
         Ok(Arc::new(saidwork_capture::PulseBackend::new()))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        Ok(Arc::new(saidwork_capture::WasapiBackend::new()))
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
     {
         Err(BootstrapError::NoAudioBackend)
     }
@@ -263,7 +269,11 @@ mod tests {
     fn share_placeholder_resolves_to_a_shipped_file() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = AppPaths::rooted_at(tmp.path());
-        let script = tmp.path().join("share/pianissimo-server/server.py");
+        let script = tmp
+            .path()
+            .join("share")
+            .join("pianissimo-server")
+            .join("server.py");
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
         std::fs::write(&script, "").unwrap();
 
