@@ -19,6 +19,8 @@ pub enum SessionEvent {
         format: String,
     },
     NoteSaved(PathBuf),
+    /// Something went wrong without failing the session, e.g. a truncated prompt.
+    Warning(String),
 }
 
 impl std::fmt::Display for SessionEvent {
@@ -36,6 +38,7 @@ impl std::fmt::Display for SessionEvent {
             ),
             Self::Rewriting { format } => write!(f, "rewriting as “{format}”…"),
             Self::NoteSaved(path) => write!(f, "note saved to {}", path.display()),
+            Self::Warning(message) => write!(f, "warning: {message}"),
         }
     }
 }

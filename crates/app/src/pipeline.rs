@@ -197,6 +197,9 @@ impl Pipeline {
             context,
         };
         let note = self.rewriter.rewrite(&request).await?;
+        for warning in &note.warnings {
+            emit(events, SessionEvent::Warning(warning.clone()));
+        }
         let path = self.notes.save(&Note {
             markdown: note.markdown.clone(),
             format_id: format.id.to_string(),
@@ -297,6 +300,7 @@ mod tests {
             Ok(RewrittenNote {
                 markdown: format!("# Ship Friday\n\n{}\n", req.transcript),
                 title: Some("Ship Friday".into()),
+                warnings: Vec::new(),
             })
         }
     }
@@ -308,6 +312,7 @@ mod tests {
             base_url: Url::parse("http://127.0.0.1:1").unwrap(),
             api_key: None,
             model: "m".into(),
+            context_window: None,
             launch: None,
         }
     }

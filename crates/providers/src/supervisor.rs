@@ -298,6 +298,7 @@ mod tests {
             base_url: Url::parse("http://127.0.0.1:1").unwrap(),
             api_key: None,
             model: "m".into(),
+            context_window: None,
             launch,
         }
     }

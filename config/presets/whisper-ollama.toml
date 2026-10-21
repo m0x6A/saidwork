@@ -40,6 +40,9 @@ stop_on_exit = true
 kind = "ollama"
 base_url = "http://127.0.0.1:11434"
 model = "qwen3:8b"
+# Tokens of context (Ollama's num_ctx). The server default is too small for long recordings;
+# raise it as far as your VRAM allows.
+context_window = 16384
 [providers.ollama.launch]
 command = "ollama"
 args = ["serve"]

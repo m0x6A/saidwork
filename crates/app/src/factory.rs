@@ -26,10 +26,13 @@ pub fn build_rewriter(provider: &Provider) -> Arc<dyn Rewriter> {
             provider.api_key.clone(),
             provider.model.clone(),
         )),
-        ProviderKind::Ollama => Arc::new(OllamaRewriter::new(
-            &provider.base_url,
-            provider.api_key.clone(),
-            provider.model.clone(),
-        )),
+        ProviderKind::Ollama => Arc::new(
+            OllamaRewriter::new(
+                &provider.base_url,
+                provider.api_key.clone(),
+                provider.model.clone(),
+            )
+            .with_context_window(provider.context_window),
+        ),
     }
 }
