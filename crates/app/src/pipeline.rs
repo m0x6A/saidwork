@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::Local;
+use chrono::{DateTime, Local, TimeZone};
 use saidwork_capture::{CaptureError, Recording};
 use saidwork_formats::{
     FormatError, FormatId, FormatRepository, FormatSelector, ManualSelector, SelectionError,
@@ -10,7 +10,9 @@ use saidwork_kernel::Clock;
 use saidwork_notes::{Note, NoteError, NoteStore};
 use saidwork_providers::{ProviderError, ProviderName, ProviderSupervisor};
 use saidwork_rewriting::{FormatSpec, RewriteError, RewriteRequest, Rewriter, RewrittenNote};
-use saidwork_transcription::{AudioInput, Transcriber, TranscriptionError, TranscriptionRequest};
+use saidwork_transcription::{
+    AudioInput, Transcriber, Transcript, TranscriptionError, TranscriptionRequest,
+};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::events::SessionEvent;
@@ -126,6 +128,12 @@ impl Pipeline {
         let text = transcript.as_plain_text();
         let transcript_path = self.sessions_dir.join(format!("{}.txt", recording.id));
         write(&transcript_path, text.as_bytes())?;
+        if let Some(timed) = timed_text(&transcript, &recording.started_at.with_timezone(&Local)) {
+            let timed_path = self
+                .sessions_dir
+                .join(format!("{}.timed.txt", recording.id));
+            write(&timed_path, timed.as_bytes())?;
+        }
         emit(
             events,
             SessionEvent::Transcribed {
@@ -208,6 +216,26 @@ impl Pipeline {
     }
 }
 
+/// The transcript as `[HH:MM:SS] text` lines, one per segment, stamped with the wall-clock time
+/// the segment started so it can be lined up with notes taken during the recording. `None` when
+/// the transcriber returned no segments.
+fn timed_text<Tz: TimeZone>(transcript: &Transcript, started_at: &DateTime<Tz>) -> Option<String>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let lines: Vec<String> = transcript
+        .segments
+        .iter()
+        .filter(|s| !s.text.trim().is_empty())
+        .map(|s| {
+            let offset = chrono::Duration::from_std(s.start).unwrap_or_default();
+            let at = started_at.clone() + offset;
+            format!("[{}] {}", at.format("%H:%M:%S"), s.text.trim())
+        })
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n") + "\n")
+}
+
 fn write(path: &Path, bytes: &[u8]) -> Result<(), SessionError> {
     let io = |source| SessionError::Io {
         path: path.to_path_buf(),
@@ -232,7 +260,7 @@ mod tests {
         HealthProbe, LaunchSpec, ManagedProcess, ProcessLauncher, Provider, ProviderKind,
     };
     use saidwork_rewriting::RewrittenNote;
-    use saidwork_transcription::Transcript;
+    use saidwork_transcription::Segment;
     use url::Url;
 
     use super::*;
@@ -376,7 +404,12 @@ mod tests {
             std::fs::read_to_string(outcome.transcript_path.unwrap()).unwrap(),
             "we ship on friday"
         );
-        assert!(outcome.recording_path.unwrap().exists());
+        let recording_path = outcome.recording_path.unwrap();
+        assert!(recording_path.exists());
+        assert!(
+            !recording_path.with_extension("timed.txt").exists(),
+            "no segments, no timed transcript"
+        );
         assert_eq!(
             transcriber.0.lock().unwrap().len(),
             1,
@@ -488,5 +521,28 @@ mod tests {
             ),
             "{err}"
         );
+    }
+
+    #[test]
+    fn timed_text_stamps_segments_with_wall_clock_time() {
+        let segment = |start: u64, text: &str| Segment {
+            start: std::time::Duration::from_secs(start),
+            end: std::time::Duration::from_secs(start + 1),
+            text: text.into(),
+        };
+        let transcript = Transcript {
+            text: String::new(),
+            language: None,
+            segments: vec![segment(0, " hello "), segment(5, ""), segment(3_725, "bye")],
+        };
+        let started_at = chrono::FixedOffset::east_opt(3600)
+            .unwrap()
+            .with_ymd_and_hms(2026, 10, 21, 18, 1, 3)
+            .unwrap();
+        assert_eq!(
+            timed_text(&transcript, &started_at).as_deref(),
+            Some("[18:01:03] hello\n[19:03:08] bye\n")
+        );
+        assert_eq!(timed_text(&Transcript::default(), &started_at), None);
     }
 }

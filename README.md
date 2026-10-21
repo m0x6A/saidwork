@@ -21,6 +21,8 @@ saidwork record     # headless: Enter stops, note path is printed
 4. **Save** – the note lands in your notes directory as
    `YYYYMMDD-HHMMSS-<format>-<title>.md`. The raw WAV and transcript are kept under the
    data directory so a note can be regenerated with another format (`saidwork rewrite`).
+   When the transcriber returns segments, `<id>.timed.txt` next to them has one
+   `[HH:MM:SS] text` line per segment, stamped with the clock time it was said.
 
 Local servers can be started on demand: give a provider a `launch` block and saidwork
 spawns it when it is not answering, waits for the health check, and stops it on exit.
