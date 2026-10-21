@@ -49,6 +49,8 @@ pub struct Format {
     pub description: String,
     /// Guidance for choosing this format automatically; consumed by a future LLM selector.
     pub when_to_use: Option<String>,
+    /// Names and terms likely to be said, handed to the transcriber as a spelling hint.
+    pub vocabulary: Option<String>,
     /// The Markdown template / instructions handed to the rewriter.
     pub template: String,
 }
@@ -86,6 +88,8 @@ struct Frontmatter {
     description: String,
     #[serde(default)]
     when_to_use: Option<String>,
+    #[serde(default)]
+    vocabulary: Option<String>,
 }
 
 /// Parse a Markdown document with YAML frontmatter into a [`Format`].
@@ -110,6 +114,10 @@ pub fn parse_format(id: FormatId, source: &str) -> Result<Format, FormatError> {
         description: meta.description.trim().to_owned(),
         when_to_use: meta
             .when_to_use
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty()),
+        vocabulary: meta
+            .vocabulary
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty()),
         template,
@@ -160,6 +168,15 @@ mod tests {
         let src = "---\nname: A\ndescription: B\n---\nbody";
         let f = parse_format(id("a"), src).unwrap();
         assert_eq!(f.when_to_use, None);
+    }
+
+    #[test]
+    fn vocabulary_is_optional_and_trimmed() {
+        let src = "---\nname: A\ndescription: B\nvocabulary: >\n  Kubernetes, Grafana,\n  Tromsø\n---\nbody";
+        let f = parse_format(id("a"), src).unwrap();
+        assert_eq!(f.vocabulary.as_deref(), Some("Kubernetes, Grafana, Tromsø"));
+        let f = parse_format(id("a"), "---\nname: A\ndescription: B\n---\nbody").unwrap();
+        assert_eq!(f.vocabulary, None);
     }
 
     #[test]

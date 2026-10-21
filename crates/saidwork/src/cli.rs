@@ -48,7 +48,12 @@ enum Command {
         review: bool,
     },
     /// Transcribe a WAV file and print the text.
-    Transcribe { file: PathBuf },
+    Transcribe {
+        file: PathBuf,
+        /// Use this format's `vocabulary` as a spelling hint for the transcriber.
+        #[arg(long)]
+        format: Option<String>,
+    },
     /// Rewrite a transcript text file into a note.
     Rewrite {
         file: PathBuf,
@@ -178,10 +183,10 @@ pub async fn run() -> anyhow::Result<()> {
             let note = with_shutdown(&app, record(&app, format, context, fake)).await?;
             review_note(review, &note).await
         }
-        Command::Transcribe { file } => {
+        Command::Transcribe { file, format } => {
             let app = ctx.headless_app()?;
             require_ready(&app, &[&app.pipeline.transcriber_name]).await?;
-            with_shutdown(&app, transcribe(&app, &file)).await
+            with_shutdown(&app, transcribe(&app, &file, format.as_deref())).await
         }
         Command::Rewrite {
             file,
@@ -374,12 +379,16 @@ fn devices() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn transcribe(app: &App, file: &Path) -> anyhow::Result<()> {
+async fn transcribe(app: &App, file: &Path, format: Option<&str>) -> anyhow::Result<()> {
+    let vocabulary = match format {
+        Some(id) => app.formats.get(&FormatId::new(id)?)?.vocabulary,
+        None => None,
+    };
     app.pipeline
         .prepare_providers(Some(&stderr_events()))
         .await?;
     let wav = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
-    let transcript = app.pipeline.transcribe_wav(wav).await?;
+    let transcript = app.pipeline.transcribe_wav(wav, vocabulary).await?;
     println!("{}", transcript.as_plain_text());
     Ok(())
 }

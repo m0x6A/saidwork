@@ -122,7 +122,9 @@ impl Pipeline {
         emit(events, SessionEvent::RecordingSaved(recording_path.clone()));
 
         emit(events, SessionEvent::Transcribing);
-        let transcript = self.transcribe_wav(wav).await?;
+        // An unknown format is reported by the rewrite step; here it only means no hint.
+        let vocabulary = self.formats.get(format).ok().and_then(|f| f.vocabulary);
+        let transcript = self.transcribe_wav(wav, vocabulary).await?;
         let text = transcript.as_plain_text();
         let transcript_path = self.sessions_dir.join(format!("{}.txt", recording.id));
         write(&transcript_path, text.as_bytes())?;
@@ -146,14 +148,16 @@ impl Pipeline {
         })
     }
 
-    /// Transcribe WAV bytes with the configured transcriber.
+    /// Transcribe WAV bytes with the configured transcriber; `vocabulary` (a format's names and
+    /// terms) is passed on as the transcription prompt.
     pub async fn transcribe_wav(
         &self,
         wav: Vec<u8>,
+        vocabulary: Option<String>,
     ) -> Result<saidwork_transcription::Transcript, SessionError> {
         let request = TranscriptionRequest {
             language: self.language.clone(),
-            prompt: None,
+            prompt: vocabulary,
         };
         Ok(self
             .transcriber
@@ -270,6 +274,22 @@ mod tests {
                 text: "we ship on friday".into(),
                 language: Some("en".into()),
                 segments: vec![],
+            })
+        }
+    }
+
+    struct PromptTranscriber(Mutex<Vec<Option<String>>>);
+    #[async_trait]
+    impl Transcriber for PromptTranscriber {
+        async fn transcribe(
+            &self,
+            _: &AudioInput,
+            req: &TranscriptionRequest,
+        ) -> Result<Transcript, TranscriptionError> {
+            self.0.lock().unwrap().push(req.prompt.clone());
+            Ok(Transcript {
+                text: "hello".into(),
+                ..Transcript::default()
             })
         }
     }
@@ -439,6 +459,32 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, SessionError::SilentRecording));
         assert!(transcriber.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn format_vocabulary_becomes_the_transcription_prompt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let transcriber = Arc::new(PromptTranscriber(Mutex::new(vec![])));
+        let p = pipeline(
+            tmp.path(),
+            transcriber.clone(),
+            Arc::new(FakeRewriter(Mutex::new(None))),
+        );
+        std::fs::write(
+            tmp.path().join("formats").join("standup.md"),
+            "---\nname: Standup\ndescription: d\nvocabulary: Kubernetes, Grafana\n---\n# {{title}}\n",
+        )
+        .unwrap();
+        let rec = recording(vec![5; 1600]);
+        for id in ["standup", "task-list"] {
+            p.process(&rec, &FormatId::new(id).unwrap(), None, None)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            *transcriber.0.lock().unwrap(),
+            [Some("Kubernetes, Grafana".to_owned()), None]
+        );
     }
 
     #[tokio::test]

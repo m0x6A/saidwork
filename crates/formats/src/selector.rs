@@ -46,6 +46,7 @@ mod tests {
             name: id.to_owned(),
             description: String::new(),
             when_to_use: None,
+            vocabulary: None,
             template: "x".to_owned(),
         }
     }

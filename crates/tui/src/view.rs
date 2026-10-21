@@ -197,6 +197,7 @@ mod tests {
                 name: "Meeting notes".into(),
                 description: "Minutes".into(),
                 when_to_use: None,
+                vocabulary: None,
                 template: "t".into(),
             },
             Format {
@@ -204,6 +205,7 @@ mod tests {
                 name: "Task list".into(),
                 description: "Todos".into(),
                 when_to_use: None,
+                vocabulary: None,
                 template: "t".into(),
             },
         ];
