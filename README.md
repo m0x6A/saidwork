@@ -100,6 +100,15 @@ The body is handed to the rewriting model as the template to follow; `{{date}}` 
 `{{title}}` are filled in. `when_to_use` is reserved for a future selector that lets the
 LLM pick the format from the transcript.
 
+An optional `vocabulary` field lists names and terms that are likely to come up. It is
+sent to the transcriber as its prompt, which Whisper-family models use as a spelling hint;
+servers that ignore the prompt are unaffected. `saidwork transcribe --format <id>` uses it
+too.
+
+```yaml
+vocabulary: Kubernetes, Grafana, the names of the people in the meeting
+```
+
 The built-in formats (`conversation`, the default, plus `meeting-notes`, `journal-entry`
 and `task-list`) are written to the formats directory at startup if they have never been installed there,
 so new built-ins arrive with upgrades. Installed ones are tracked in
