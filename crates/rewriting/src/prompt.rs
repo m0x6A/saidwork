@@ -66,6 +66,7 @@ pub fn post_process(raw: &str) -> RewrittenNote {
     RewrittenNote {
         markdown: format!("{text}\n"),
         title,
+        warnings: Vec::new(),
     }
 }
 

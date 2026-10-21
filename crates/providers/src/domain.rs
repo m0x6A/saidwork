@@ -105,6 +105,8 @@ pub struct Provider {
     pub base_url: Url,
     pub api_key: Option<SecretString>,
     pub model: String,
+    /// Requested context window in tokens; only the Ollama rewriter uses it.
+    pub context_window: Option<u32>,
     pub launch: Option<LaunchSpec>,
 }
 
@@ -127,6 +129,7 @@ impl fmt::Debug for Provider {
             .field("base_url", &self.base_url.as_str())
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("model", &self.model)
+            .field("context_window", &self.context_window)
             .field("launch", &self.launch)
             .finish()
     }
@@ -185,6 +188,7 @@ mod tests {
             base_url: Url::parse("http://127.0.0.1:11434").unwrap(),
             api_key: Some(SecretString::from("hunter2")),
             model: "m".into(),
+            context_window: None,
             launch,
         }
     }

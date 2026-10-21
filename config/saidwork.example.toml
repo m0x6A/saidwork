@@ -88,6 +88,7 @@ stop_on_exit = true
 # kind = "ollama"
 # base_url = "http://127.0.0.1:11434"
 # model = "qwen3:8b"
+# context_window = 16384         # num_ctx; the server default truncates long transcripts
 # [providers.ollama.launch]
 # command = "ollama"
 # args = ["serve"]

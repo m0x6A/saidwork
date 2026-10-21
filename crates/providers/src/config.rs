@@ -15,6 +15,10 @@ pub struct ProviderConfig {
     pub kind: ProviderKindConfig,
     pub base_url: String,
     pub model: String,
+    /// Context window in tokens to request from the server (Ollama's `num_ctx`). Unset keeps
+    /// the server's default, which is often too small for a long transcript.
+    #[serde(default)]
+    pub context_window: Option<u32>,
     /// Name of an environment variable holding the API key (preferred).
     #[serde(default)]
     pub api_key_env: Option<String>,
@@ -96,6 +100,7 @@ impl ProviderConfig {
             base_url,
             api_key,
             model: self.model.clone(),
+            context_window: self.context_window,
             launch: self.launch.as_ref().map(LaunchConfig::to_spec),
         })
     }
@@ -196,6 +201,19 @@ mod tests {
         assert!(spec.stop_on_exit);
         assert!(spec.health_path.is_none());
         assert_eq!(spec.required_files, [PathBuf::from("/models/a.bin")]);
+    }
+
+    #[test]
+    fn context_window_is_optional() {
+        let without = parse("kind = \"ollama\"\nbase_url = \"http://x\"\nmodel = \"m\"");
+        assert_eq!(without.resolve("o", |_| None).unwrap().context_window, None);
+        let with = parse(
+            "kind = \"ollama\"\nbase_url = \"http://x\"\nmodel = \"m\"\ncontext_window = 16384",
+        );
+        assert_eq!(
+            with.resolve("o", |_| None).unwrap().context_window,
+            Some(16384)
+        );
     }
 
     #[test]

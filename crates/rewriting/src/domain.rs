@@ -22,6 +22,8 @@ pub struct RewrittenNote {
     pub markdown: String,
     /// First level-one heading, if any.
     pub title: Option<String>,
+    /// Problems worth telling the user about even though a note came back.
+    pub warnings: Vec<String>,
 }
 
 /// Errors of the rewriting slice.
