@@ -34,7 +34,7 @@ jobs:
           tar czf "dist/$name.tar.gz" "$name"
           cargo deb -p saidwork --no-build --output dist
           cargo generate-rpm -p crates/saidwork --output dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: dist/*
@@ -59,7 +59,7 @@ jobs:
           Copy-Item packaging\install.ps1, README.md, docs\INSTALL.md, LICENSE-MIT, LICENSE-APACHE $name
           Copy-Item -Recurse config "$name\examples"
           Compress-Archive -Path $name -DestinationPath "dist\$name.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/*
